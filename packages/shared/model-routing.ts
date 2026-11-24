@@ -15,7 +15,11 @@ export function classifyTask(text: string): TaskType {
   return 'general';
 }
 export function effectiveContext(model: Model) {
-  return Math.min(model.contextTokens, model.loadedContextTokens ?? Infinity);
+  return Math.min(
+    model.contextTokens,
+    model.loadedContextTokens ?? Infinity,
+    model.maxContextTokens ?? Infinity,
+  );
 }
 export function canUseTools(model: Model) {
   return (

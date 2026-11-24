@@ -345,6 +345,7 @@ export function Models({
       {model && (
         <ModelEditor
           model={model}
+          provider={data.providers.find((p) => p.id === model.providerId)}
           close={() => setModel(undefined)}
           save={async (m) => {
             await api(`/models/${encodeURIComponent(m.id)}`, 'PUT', m);
@@ -528,14 +529,17 @@ export function ProviderEditor({
 
 export function ModelEditor({
   model,
+  provider,
   close,
   save,
 }: {
   model: Model;
+  provider?: Provider;
   close: () => void;
   save: (m: Model) => Promise<void>;
 }) {
   const [m, setM] = useState({ ...model, contextSource: model.contextSource ?? 'server' });
+  const serviceContext = provider?.kind === 'claude-code' ? model.maxContextTokens : undefined;
   const [error, setError] = useState('');
   return (
     <Modal title="A good fit for the job" close={close}>
@@ -627,13 +631,15 @@ export function ModelEditor({
               setM({
                 ...m,
                 contextSource: e.target.value as NonNullable<Model['contextSource']>,
-                ...(e.target.value === 'server' && m.loadedContextTokens
-                  ? { contextTokens: m.loadedContextTokens }
+                ...(e.target.value === 'server' && (serviceContext ?? m.loadedContextTokens)
+                  ? { contextTokens: (serviceContext ?? m.loadedContextTokens)! }
                   : {}),
               })
             }
           >
-            <option value="server">Auto · use loaded server context</option>
+            <option value="server">
+              {serviceContext ? 'Auto · use service context' : 'Auto · use loaded server context'}
+            </option>
             <option value="manual">Manual context cap</option>
           </select>
           <input
@@ -644,10 +650,14 @@ export function ModelEditor({
             onChange={(e) => setM({ ...m, contextTokens: Number(e.target.value) })}
           />
           <small>
-            {m.loadedContextTokens
-              ? `Server loaded: ${m.loadedContextTokens.toLocaleString()} tokens. Effective budget: ${effectiveContext(m).toLocaleString()}.`
-              : 'No loaded context is reported. A manual value is used for servers without context metadata.'}{' '}
-            The model’s advertised maximum is separate from its current loaded context.
+            {serviceContext
+              ? `Service context: ${serviceContext.toLocaleString()} tokens. Auto uses this window; a manual cap can lower it.`
+              : m.loadedContextTokens
+                ? `Server loaded: ${m.loadedContextTokens.toLocaleString()} tokens. Effective budget: ${effectiveContext(m).toLocaleString()}.`
+                : 'No loaded context is reported. A manual value is used for servers without context metadata.'}{' '}
+            {serviceContext
+              ? 'Reasoning effort does not set the context window.'
+              : 'The model’s advertised maximum is separate from its current loaded context.'}
           </small>
         </Field>
         <Field label="Reasoning effort">

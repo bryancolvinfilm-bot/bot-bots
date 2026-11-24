@@ -304,7 +304,12 @@ export class ClaudeCode {
       return {
         message: { role: 'assistant', content: answer.text || null, tool_calls: calls },
         truncated: false,
-        tokens: usage ? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) : undefined,
+        tokens: usage
+          ? (usage.input_tokens ?? 0) +
+            (usage.output_tokens ?? 0) +
+            (usage.cache_creation_input_tokens ?? 0) +
+            (usage.cache_read_input_tokens ?? 0)
+          : undefined,
         stopReason: 'stop',
       };
     } finally {

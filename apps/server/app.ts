@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadGoogleRegistration } from './google-registration';
-import type { Bootstrap } from '../../packages/shared/types';
+import type { Bootstrap, Model } from '../../packages/shared/types';
 import { Alerts } from './alerts';
 import {
   discover,
@@ -18,6 +18,7 @@ import { ClaudeCode } from './claude-code';
 import { botInput, routineInput, saveRoutine } from './bot-controls';
 import { selectBotModel } from './bot-models';
 import { EFFORTS } from '../../packages/shared/model-effort';
+import { migrateClaudeContexts, withClaudeContext } from './frontier-context';
 import type { Credentials } from './credentials';
 import { Runtime } from './runtime';
 import { Store } from './store';
@@ -239,6 +240,7 @@ export function createApp(
   if (credentials && chatgpt) attachChatGPT(store, credentials, chatgpt);
   const claude = new ClaudeCode(join(dataDir, 'claude-code'));
   if (credentials) attachClaudeCode(store, credentials, claude);
+  migrateClaudeContexts(store);
   const alerts = new Alerts(store, credentials);
   const terminal = new Terminal(
     store,
@@ -1752,20 +1754,18 @@ export function createApp(
     '/api/bots',
     wrap((req, res) => {
       const bot = { ...botSchema.parse(req.body), id: randomUUID() };
-      res
-        .status(201)
-        .json(
-          selectBotModel(
-            store,
-            bot.id,
-            {
-              providerId: bot.providerId,
-              modelId: bot.modelId,
-              reasoningEffort: bot.reasoningEffort,
-            },
-            bot,
-          ),
-        );
+      res.status(201).json(
+        selectBotModel(
+          store,
+          bot.id,
+          {
+            providerId: bot.providerId,
+            modelId: bot.modelId,
+            reasoningEffort: bot.reasoningEffort,
+          },
+          bot,
+        ),
+      );
     }),
   );
   const botLifecycle =
@@ -1912,19 +1912,34 @@ export function createApp(
             ? true
             : changes.enabled;
       res.json(
-        store.put('models', {
-          ...old,
-          ...changes,
-          enabled,
-          contextTokens:
-            changes.contextSource === 'server' && old.loadedContextTokens
-              ? old.loadedContextTokens
-              : changes.contextTokens,
-          enablement: changes.enablement ?? (enabled !== old.enabled ? 'manual' : old.enablement),
-          contextSource:
-            changes.contextSource ??
-            (changes.contextTokens !== old.contextTokens ? 'manual' : old.contextSource),
-        }),
+        store.put(
+          'models',
+          provider?.kind === 'claude-code'
+            ? withClaudeContext({
+                ...old,
+                ...changes,
+                enabled,
+                enablement:
+                  changes.enablement ?? (enabled !== old.enabled ? 'manual' : old.enablement),
+                contextSource:
+                  changes.contextSource ??
+                  (changes.contextTokens !== old.contextTokens ? 'manual' : old.contextSource),
+              })
+            : {
+                ...old,
+                ...changes,
+                enabled,
+                contextTokens:
+                  changes.contextSource === 'server' && old.loadedContextTokens
+                    ? old.loadedContextTokens
+                    : changes.contextTokens,
+                enablement:
+                  changes.enablement ?? (enabled !== old.enabled ? 'manual' : old.enablement),
+                contextSource:
+                  changes.contextSource ??
+                  (changes.contextTokens !== old.contextTokens ? 'manual' : old.contextSource),
+              },
+        ),
       );
     }),
   );
@@ -1932,24 +1947,28 @@ export function createApp(
     '/api/models',
     wrap((req, res) => {
       const a = z.object({ providerId: id, name: id }).parse(req.body);
-      if (!store.get('providers', a.providerId)) {
+      const provider = store.get('providers', a.providerId);
+      if (!provider) {
         res.status(404).json({ error: 'Provider not found' });
         return;
       }
-      res.status(201).json(
-        store.put('models', {
-          id: `${a.providerId}::${a.name}`,
-          providerId: a.providerId,
-          name: a.name,
-          enabled: false,
-          enablement: 'manual',
-          priority: 50,
-          costPerMillion: 0,
-          tasks: ['general'],
-          contextTokens: 32768,
-          status: 'unknown',
-        }),
-      );
+      const model: Model = {
+        id: `${a.providerId}::${a.name}`,
+        providerId: a.providerId,
+        name: a.name,
+        enabled: false,
+        enablement: 'manual',
+        priority: 50,
+        costPerMillion: 0,
+        tasks: ['general'],
+        contextTokens: 32768,
+        status: 'unknown',
+      };
+      res
+        .status(201)
+        .json(
+          store.put('models', provider.kind === 'claude-code' ? withClaudeContext(model) : model),
+        );
     }),
   );
   app.put(
@@ -2627,6 +2646,7 @@ export function createApp(
             store.put(collection, v as never);
           }
         }
+        migrateClaudeContexts(store);
         for (const request of runtime.setups.list())
           if (request.status === 'awaiting-entry') runtime.setups.finish(request.id, 'cancelled');
         raw.settings.mainBotId = mainBot(store.all('bots'), raw.settings.mainBotId)?.id ?? null;

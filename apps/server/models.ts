@@ -7,6 +7,7 @@ import { rankModels, effectiveContext } from '../../packages/shared/model-routin
 import { Credentials, redactSecrets } from './credentials';
 import { ChatGPTAuth } from './chatgpt-auth';
 import { ClaudeCode } from './claude-code';
+import { withClaudeContext } from './frontier-context';
 const claudeConnections = new WeakMap<Credentials, ClaudeCode>();
 const storeClaude = new WeakMap<Store, ClaudeCode>();
 export function attachClaudeCode(store: Store, credentials: Credentials, claude: ClaudeCode) {
@@ -73,23 +74,26 @@ export async function discover(
     for (const name of ['sonnet', 'opus', 'haiku', 'fable']) {
       const id = `${providerId}::${name}`,
         old = store.get('models', id);
-      store.put('models', {
-        id,
-        providerId,
-        name,
-        enabled: false,
-        enablement: 'manual',
-        priority: 50,
-        costPerMillion: 0,
-        tasks: ['general'],
-        contextTokens: 32768,
-        supportsTools: true,
-        ...old,
-        status: 'online',
-        loadState: 'loaded',
-        lastError: undefined,
-        lastSeen: new Date().toISOString(),
-      });
+      store.put(
+        'models',
+        withClaudeContext({
+          id,
+          providerId,
+          name,
+          enabled: false,
+          enablement: 'manual',
+          priority: 50,
+          costPerMillion: 0,
+          tasks: ['general'],
+          contextTokens: 32768,
+          supportsTools: true,
+          ...old,
+          status: 'online',
+          loadState: 'loaded',
+          lastError: undefined,
+          lastSeen: new Date().toISOString(),
+        }),
+      );
     }
     store.put('providers', {
       ...provider,
@@ -228,7 +232,7 @@ export function fitContext(
     const currentPrompt = input.findIndex((m, index) => index > previousReply && m.role === 'user');
     if (currentPrompt <= 1)
       throw new TaskLimitError(
-        'This bot and task exceed the configured context window. Use a larger context model or start a shorter task.',
+        `Bot-Bots' configured context window is too small for this request: approximately ${estimate().toLocaleString()} input tokens, ${maxTokens.toLocaleString()} output tokens reserved, and a ${contextTokens.toLocaleString()}-token effective window. Check the model's context source/cap in Model workshop. This check stopped the request before provider inference.`,
       );
     input.splice(1, 1);
   }

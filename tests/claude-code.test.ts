@@ -77,7 +77,12 @@ test('Claude browser-login inference preserves bot tool requests, disables nativ
           text: '',
           calls: [{ name: invented ? 'Bash' : 'save_note', arguments: '{"text":"hello"}' }],
         },
-        usage: { input_tokens: 10, output_tokens: 12 },
+        usage: {
+          input_tokens: 10,
+          output_tokens: 12,
+          cache_creation_input_tokens: 40,
+          cache_read_input_tokens: 30,
+        },
       }),
     };
   };
@@ -103,7 +108,7 @@ test('Claude browser-login inference preserves bot tool requests, disables nativ
     'high',
   );
   assert.equal(result.message.tool_calls![0].function.name, 'save_note');
-  assert.equal(result.tokens, 22);
+  assert.equal(result.tokens, 92);
   assert.ok(calls[0].input.includes('Only follow this bot'));
   assert.equal(calls[0].args[calls[0].args.indexOf('--tools') + 1], '');
   assert.equal(calls[0].args[calls[0].args.indexOf('--effort') + 1], 'high');
