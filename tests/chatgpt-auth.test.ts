@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { test } from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -37,6 +37,7 @@ const model: Model = {
   contextTokens: 32768,
 };
 async function fixture() {
+  mkdirSync('test-results/unit', { recursive: true });
   const dir = mkdtempSync(resolve('test-results/unit/chatgpt-'));
   const key = randomBytes(32),
     vault = new SecretVault(join(dir, 'auth'), () => key);
