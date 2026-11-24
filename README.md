@@ -22,6 +22,8 @@ pnpm start
 
 Then open `http://127.0.0.1:3210`. On Windows, the included `.cmd` launchers can open a built desktop/server app. Build and package a desktop folder with `pnpm package:desktop`.
 
+On Windows, run `pnpm build:launcher` to create **Bot-Bots.exe** in the project folder. Double-click it to open the newest packaged desktop version, or the built source app if no package exists. It opens without a command window and uses the project's `data/` folder. Keep the launcher beside `release/` and `data/`; it does not need rebuilding for each new app version.
+
 For development, run `pnpm dev` for the server and `pnpm dev:web` in another terminal for the Vite interface.
 
 ## Models

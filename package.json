@@ -15,6 +15,7 @@
     "start": "node dist/server/index.js",
     "desktop": "electron .",
     "package:desktop": "electron-builder --dir",
+    "build:launcher": "node scripts/build-launcher.mjs",
     "test": "tsx --test tests/*.test.ts",
     "check": "tsc --noEmit",
     "format": "prettier --write apps packages scripts tests *.ts"
