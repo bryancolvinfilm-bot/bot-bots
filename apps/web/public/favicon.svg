@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-labelledby="title">
+  <title id="title">Three little bots side by side</title>
+  <rect width="200" height="200" rx="48" fill="#302e35"/>
+  <g fill="#19171d" opacity=".35">
+    <ellipse cx="42" cy="146" rx="28" ry="5"/>
+    <ellipse cx="105" cy="146" rx="26" ry="5"/>
+    <ellipse cx="164" cy="146" rx="23" ry="5"/>
+  </g>
+  <path d="M16 128 35 72q6-15 13 0l22 55q5 12-8 12H25q-13 0-9-11Z" fill="#d486df"/>
+  <path d="M81 129c-9-10-5-27 5-31-2-16 19-24 29-12 15-4 25 11 18 23 8 16-5 30-20 29-13 7-26 2-32-9Z" fill="#83b7e6"/>
+  <rect x="143" y="81" width="43" height="58" rx="21.5" fill="#a9cd8e"/>
+  <g fill="#29372c">
+    <ellipse cx="33" cy="111" rx="2.8" ry="4.2"/>
+    <ellipse cx="50" cy="111" rx="2.8" ry="4.2"/>
+    <ellipse cx="97" cy="110" rx="2.8" ry="4.2"/>
+    <ellipse cx="114" cy="110" rx="2.8" ry="4.2"/>
+    <ellipse cx="156" cy="110" rx="2.8" ry="4.2"/>
+    <ellipse cx="173" cy="110" rx="2.8" ry="4.2"/>
+  </g>
+  <g fill="none" stroke="#29372c" stroke-width="2.8" stroke-linecap="round">
+    <path d="M37 123q5 5 10 0"/>
+    <path d="M101 122q5 5 10 0"/>
+    <path d="M160 122q5 5 10 0"/>
+  </g>
+  <g fill="#fff" opacity=".22">
+    <ellipse cx="27" cy="121" rx="4" ry="2.4"/>
+    <ellipse cx="56" cy="121" rx="4" ry="2.4"/>
+    <ellipse cx="91" cy="120" rx="4" ry="2.4"/>
+    <ellipse cx="120" cy="120" rx="4" ry="2.4"/>
+    <ellipse cx="150" cy="120" rx="4" ry="2.4"/>
+    <ellipse cx="179" cy="120" rx="4" ry="2.4"/>
+  </g>
+</svg>

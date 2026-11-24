@@ -1,0 +1,26 @@
+---
+name: bot-bots-models
+description: Help configure local or network model servers, model discovery, selection, context limits and fallback in Bot-Bots.
+metadata:
+  topics: lm studio, model workshop, model server, model selection, switch models, change models, context window, context ran out, output truncated, local model, model offline, no models
+---
+
+# Model servers and context
+
+**Frontier models** connects the whole team to online models. **Continue with ChatGPT** opens browser authorization for an eligible plan. **Continue with Claude** runs the official, unmodified Claude Code tool and its own browser login on the host computer; that tool keeps its credentials. Existing Claude Code login is recognized. First use downloads and checksum-verifies the executable. API keys remain an alternative. Enable models and explicitly switch off Local-only mode. Local models can stay enabled, and each bot can have a preferred model. Each bot retains its instructions, duties and normal tool approvals. Do not collect Claude subscription tokens or use a copied token to call Anthropic's API directly.
+
+Open **Model workshop**. **Add a model server** accepts OpenAI-compatible endpoints on this computer or another machine. For local LM Studio use `http://127.0.0.1:1234/v1`; a LAN server uses that machine's IP/hostname and exposed port. In a client session, `127.0.0.1` means the **Bot-Bots server's computer**, not the viewing phone. The other model server must listen on its network interface and be reachable from the host.
+
+**Auto · follow loaded local models** checks enabled local servers every 15 seconds and before model requests. It discovers newly advertised chat models and their loaded context size. Explicitly disabled models stay disabled. The app does not load/unload model weights. A per-server refresh can update the list immediately. Unloaded/offline models are not a promise of availability. Embedding models are not chat models.
+
+For ordinary use leave the bot's model choice automatic. A bot pin or manual global model selection is an explicit owner choice. A server can expose multiple models. Fallback tries other eligible enabled models when a provider/model is unavailable; it respects local-only mode, explicit disables, capabilities and routing preferences. With no eligible models, the app records the outage and configured email/SMS alert channels can warn the owner. Those channels need their own working endpoint/destination/auth setup; don't claim they are connected by default.
+
+**Local-only mode** controls inference, not public browser research. Cloud providers/models require the owner's opt-in. For authentication load `bot-bots-api-tokens`; normal setup connects privately without manual binding IDs. ChatGPT shows saved accounts, Sign out, and a usage-limits link. If a plan is not eligible or sharing is disabled, report the actual connection error; do not claim every subscription automatically grants access.
+
+The next-reply model label follows the currently selected/loaded model. An old reply's model label remains historical. If a switch seems stale, refresh the server, check Auto/manual selection and any bot pin, and verify which models LM Studio actually has loaded. Never report that weights were changed by this chat unless an available tool actually did it.
+
+Input context and output length are different. Increasing loaded context in LM Studio gives room for instructions/history/tools, but does not remove the per-response output limit. For context exhaustion try a larger **loaded** context, a shorter task/new conversation, or deliberate memory/history compaction. Such task limits do not automatically mean the model server is offline.
+
+Long code can use Bot-Bots' saved draft notebook: write chunks, inspect checkpoints, continue an unfinished draft, then finish and preview it. Truncated output can continue on the same healthy model within bounded attempts; the system preserves unfinished text instead of pretending it is a completed app. Load `bot-bots-tools` for that workflow.
+
+Human ratings are the strongest quality signal for eligible models/bots. Default relaxed urgency allows slower local models. Explicit urgent work can favor measured faster models among similarly rated choices; successful tasks are not invented star ratings.

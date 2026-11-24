@@ -1,0 +1,151 @@
+.work-feedback {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  min-width: 0;
+}
+.work-measurements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  font-size: var(--text-label);
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  padding: 10px 0;
+}
+.reply-details,
+.conversation-options {
+  color: var(--muted);
+  font-size: var(--text-label);
+}
+.reply-details > summary,
+.conversation-options > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 5px 0;
+}
+.conversation-options {
+  margin: 8px 2px 0;
+}
+.work-feedback .rating {
+  flex-wrap: wrap;
+  margin-top: 7px;
+  gap: 4px;
+}
+.work-feedback .rating > span {
+  margin-right: 5px;
+}
+.work-feedback .rating small {
+  color: var(--accent-ink);
+  margin-left: 4px;
+}
+.feedback-details {
+  margin-top: 7px;
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+.feedback-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.feedback-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 0 4px;
+  color: var(--fg);
+}
+.feedback-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.feedback-fields select,
+.feedback-fields textarea {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-body);
+  padding: 8px;
+}
+.feedback-fields .feedback-note,
+.feedback-fields > small,
+.feedback-actions {
+  grid-column: 1 / -1;
+}
+.feedback-fields > small {
+  line-height: 1.7;
+  color: var(--muted);
+}
+.feedback-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.job-preferences {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 2px 8px;
+}
+.job-preferences label {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--muted);
+  font-size: var(--text-label);
+}
+.job-preferences select {
+  font-size: var(--text-small);
+  padding: 5px;
+  max-width: 205px;
+}
+.experience-panel {
+  margin: 30px 0;
+}
+.experience-panel > p {
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 850px;
+}
+.experience-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 15px 0;
+}
+.experience-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.experience-controls select {
+  padding: 7px;
+  max-width: 220px;
+}
+.experience-panel table td {
+  font-size: var(--text-body);
+}
+.experience-panel table small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.experience-stars {
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .feedback-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .job-preferences {
+    gap: 6px;
+  }
+  .job-preferences select {
+    max-width: 135px;
+  }
+}

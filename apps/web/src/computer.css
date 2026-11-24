@@ -1,0 +1,311 @@
+:root {
+  --computer-width: clamp(360px, 40vw, 600px);
+}
+.main-shell.has-computer {
+  margin-right: var(--computer-width);
+}
+.has-computer .chat-history {
+  display: none;
+}
+.has-computer .welcome-art {
+  display: none;
+}
+.has-computer .welcome-copy {
+  min-width: 0;
+}
+.has-computer .welcome-copy h2 {
+  max-width: none;
+}
+.has-computer .team-toolbar {
+  flex-wrap: wrap;
+}
+.topbar .topbar-tools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.computer-toggle {
+  white-space: nowrap;
+  font-size: var(--text-small);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.computer-toggle.selected {
+  background: var(--accent-surface);
+  color: var(--accent-ink);
+  border-color: var(--accent-border);
+}
+.computer-panel {
+  position: fixed;
+  z-index: 16;
+  right: 0;
+  top: 70px;
+  bottom: 0;
+  width: var(--computer-width);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -5px 0 22px var(--shadow);
+}
+.computer-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 16px;
+}
+.computer-heading > div {
+  flex: 1;
+}
+.computer-heading strong {
+  font-size: var(--text-base);
+}
+.computer-heading small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-label);
+  margin-top: 3px;
+}
+.computer-kind {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px 13px;
+  color: var(--accent-ink);
+  font-size: var(--text-small);
+  border-bottom: 1px solid var(--line);
+}
+.computer-kind > span {
+  font-size: var(--text-caption);
+  border: 1px solid var(--line);
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: var(--muted);
+}
+.computer-kind small {
+  margin-left: auto;
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.computer-search-provider {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: var(--text-label);
+  border-bottom: 1px solid var(--line);
+}
+.computer-search-provider select {
+  padding: 4px 6px;
+  font-size: var(--text-label);
+}
+.computer-search-provider > span {
+  margin-left: auto;
+  font-size: var(--text-caption);
+}
+.computer-tabs {
+  display: flex;
+  gap: 5px;
+  min-height: 48px;
+  align-items: center;
+  padding: 7px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.computer-tab {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  flex-shrink: 0;
+  width: 151px;
+}
+.computer-tab.selected {
+  background: var(--accent-surface);
+  border-color: var(--accent-border);
+}
+.computer-tab > button[role='tab'] {
+  min-width: 0;
+  flex: 1;
+  padding: 5px 6px;
+  justify-content: flex-start;
+  gap: 5px;
+}
+.computer-tab span {
+  font-size: var(--text-label);
+  min-width: 0;
+  text-align: left;
+}
+.computer-tab small {
+  display: block;
+  width: 90px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-tiny);
+  color: var(--muted);
+  margin-top: 2px;
+}
+.computer-tab .tab-close {
+  padding: 0 4px;
+}
+.computer-address {
+  display: flex;
+  gap: 4px;
+  padding: 7px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.computer-address > button {
+  padding: 6px 3px;
+}
+.computer-address > input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  padding: 8px;
+  font-size: var(--text-small);
+}
+.computer-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.computer-control > span {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  line-height: 1.6;
+}
+.computer-control .small {
+  font-size: var(--text-label);
+  padding: 6px;
+  white-space: nowrap;
+}
+.computer-control.human-control {
+  background: var(--accent-surface);
+}
+.computer-viewport {
+  flex: 1;
+  min-height: 80px;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  background: #fff;
+}
+.computer-viewport:has(.computer-empty),
+.computer-panel > .computer-empty {
+  background: var(--bg);
+}
+.computer-empty {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 28px;
+  color: var(--muted);
+  gap: 12px;
+}
+.computer-empty h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 17px;
+}
+.computer-empty p {
+  font-size: var(--text-body);
+  line-height: 1.8;
+  margin: 0;
+  max-width: 290px;
+}
+.computer-frame {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+.computer-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  min-height: 30px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+.computer-status > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-pool-status {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+  max-height: 90px;
+  overflow: auto;
+}
+.computer-error {
+  display: flex;
+  padding: 8px 10px;
+  gap: 6px;
+  font-size: var(--text-small);
+  color: var(--error-ink);
+  line-height: 1.6;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.remote-browser-input {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}
+.remote-browser-input input {
+  width: 0;
+  min-width: 0;
+  flex: 1;
+  padding: 6px;
+  font-size: var(--text-label);
+}
+@media (max-width: 1200px) {
+  .has-computer .connection-pill {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .main-shell.has-computer {
+    margin-right: 0;
+  }
+  .computer-panel {
+    width: min(600px, calc(100vw - var(--sidebar-width)));
+  }
+}
+@media (max-width: 760px) {
+  .computer-panel {
+    top: 60px;
+    width: calc(100vw - 64px);
+  }
+  .topbar-tools {
+    gap: 5px !important;
+  }
+  .computer-toggle {
+    font-size: 0;
+    gap: 0;
+    padding: 7px;
+  }
+  .topbar .connection-pill {
+    display: none;
+  }
+  .computer-kind small {
+    display: none;
+  }
+}

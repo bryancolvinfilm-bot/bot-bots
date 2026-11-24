@@ -1,0 +1,23 @@
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.steering-status {
+  display: block;
+  font-size: var(--text-label);
+  color: var(--muted);
+  margin-top: 10px;
+  line-height: 1.7;
+}
+.steering-status.applied {
+  color: var(--accent-ink);
+}
+.steering-status.queued::before {
+  content: '•';
+  margin-right: 6px;
+  color: var(--accent-ink);
+}
+.trace-event.steer {
+  color: var(--accent-ink);
+}

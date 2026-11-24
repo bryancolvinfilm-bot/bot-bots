@@ -1,0 +1,10 @@
+{
+  "name": "Bot-Bots",
+  "short_name": "Bot-Bots",
+  "description": "Your local-first little team",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#202124",
+  "theme_color": "#202124",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

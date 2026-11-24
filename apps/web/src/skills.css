@@ -1,0 +1,28 @@
+.skill-library .skill-origin {
+  display: block;
+  font-size: var(--text-small);
+  color: var(--muted);
+  font-weight: 400;
+}
+.skill-library.compact .skills-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.skill-library.compact .skill-card {
+  padding: 16px;
+}
+.skill-library.compact .skill-card h3 {
+  margin: 12px 0 8px;
+}
+.skill-library.compact .skill-card p {
+  min-height: 0;
+}
+.skill-library.compact .skill-card > span {
+  margin-top: 12px;
+}
+.skill-library .filter-row select {
+  max-width: 100%;
+}
+.bot-details-panel .tabs {
+  flex-wrap: wrap;
+}
