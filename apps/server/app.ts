@@ -4,7 +4,6 @@ import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadGoogleRegistration } from './google-registration';
 import type { Bootstrap } from '../../packages/shared/types';
-import { AVATAR_SHAPES } from '../../packages/shared/types';
 import { Alerts } from './alerts';
 import {
   discover,
@@ -16,9 +15,11 @@ import {
 import { ChatGPTAuth } from './chatgpt-auth';
 import { TeamConversations } from './team-conversations';
 import { ClaudeCode } from './claude-code';
+import { botInput, routineInput, saveRoutine } from './bot-controls';
+import { selectBotModel } from './bot-models';
+import { EFFORTS } from '../../packages/shared/model-effort';
 import type { Credentials } from './credentials';
 import { Runtime } from './runtime';
-import { nextRun } from './scheduler';
 import { Store } from './store';
 import { Computer } from './computer';
 import { Terminal } from './terminal';
@@ -35,7 +36,6 @@ import {
 } from './team';
 import {
   categorySchema,
-  phrasesSchema,
   progressSchema,
   taskRecordSchema,
   compactionSchema,
@@ -94,23 +94,7 @@ const workSchema = z.object({
   ),
   feedback: feedbackSchema.optional(),
 });
-const avatar = z.object({
-  shape: z.enum(AVATAR_SHAPES),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-});
-const botSchema = z.object({
-  categoryId: id.optional(),
-  isPrototype: z.boolean().optional(),
-  processingPhrases: phrasesSchema.optional(),
-  name: z.string().min(1).max(80),
-  title: z.string().max(160),
-  description: z.string().max(20000),
-  instructions: z.string().max(80000),
-  avatar,
-  modelId: z.string().nullable(),
-  enabled: z.boolean(),
-});
+const botSchema = botInput;
 const modelSchema = z.object({
   toolCalling: z.enum(['auto', 'enabled', 'disabled']).optional(),
   toolFormatUnsupported: z.boolean().optional(),
@@ -121,7 +105,7 @@ const modelSchema = z.object({
   costPerMillion: z.number().min(0).max(10000),
   tasks: z.array(z.enum(['general', 'research', 'coding', 'writing', 'planning'])).min(1),
   contextTokens: z.number().int().min(512).max(2000000),
-  reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  reasoningEffort: z.enum(EFFORTS).optional(),
 });
 const providerSchema = z
   .object({
@@ -175,14 +159,7 @@ const settingsSchema = z.object({
   alertSms: alertChannel,
   alertCooldownMinutes: z.number().int().min(1).max(1440),
 });
-const routineSchema = z.object({
-  botId: id,
-  name: z.string().min(1).max(160),
-  cron: z.string().min(5).max(120),
-  timezone: z.string().min(1).max(100),
-  prompt: z.string().min(1).max(60000),
-  enabled: z.boolean(),
-});
+const routineSchema = routineInput;
 export const connections = [
   {
     id: 'workspace',
@@ -1529,6 +1506,18 @@ export function createApp(
           botId: id,
           prompt: z.string().trim().min(1).max(2000000),
           clientMessageId: z.string().uuid().optional(),
+          timezone: z
+            .string()
+            .max(100)
+            .refine((value) => {
+              try {
+                new Intl.DateTimeFormat('en', { timeZone: value });
+                return true;
+              } catch {
+                return false;
+              }
+            }, 'Choose a valid timezone.')
+            .optional(),
           conversationId: id.optional(),
           urgency: urgency.optional(),
           importance: importance.optional(),
@@ -1580,7 +1569,7 @@ export function createApp(
             a.botId,
             a.prompt,
             a.conversationId,
-            a,
+            { ...a, panelAccess: res.locals.accessRole === 'owner' },
             undefined,
             'chat',
             a.clientMessageId,
@@ -1625,7 +1614,17 @@ export function createApp(
         );
         return;
       }
-      res.status(202).json(runtime.steer(String(req.params.id), content));
+      res
+        .status(202)
+        .json(
+          runtime.steer(
+            String(req.params.id),
+            content,
+            undefined,
+            undefined,
+            res.locals.accessRole === 'owner',
+          ),
+        );
     }),
   );
   app.get('/api/activity/events', (req, res) => {
@@ -1751,9 +1750,23 @@ export function createApp(
   );
   app.post(
     '/api/bots',
-    wrap((req, res) =>
-      res.status(201).json(store.put('bots', { ...botSchema.parse(req.body), id: randomUUID() })),
-    ),
+    wrap((req, res) => {
+      const bot = { ...botSchema.parse(req.body), id: randomUUID() };
+      res
+        .status(201)
+        .json(
+          selectBotModel(
+            store,
+            bot.id,
+            {
+              providerId: bot.providerId,
+              modelId: bot.modelId,
+              reasoningEffort: bot.reasoningEffort,
+            },
+            bot,
+          ),
+        );
+    }),
   );
   const botLifecycle =
     (action: 'archive' | 'restore' | 'delete'): express.RequestHandler =>
@@ -1788,6 +1801,25 @@ export function createApp(
           'Temporary workers keep their task identity. Edit the prototype for future workers.',
         );
       const updated = { ...old, ...botSchema.parse(req.body) };
+      if (
+        updated.modelId !== old.modelId ||
+        updated.providerId !== old.providerId ||
+        updated.reasoningEffort !== old.reasoningEffort
+      ) {
+        res.json(
+          selectBotModel(
+            store,
+            updated.id,
+            {
+              providerId: updated.providerId,
+              modelId: updated.modelId,
+              reasoningEffort: updated.reasoningEffort,
+            },
+            updated,
+          ),
+        );
+        return;
+      }
       store.db.exec('BEGIN IMMEDIATE');
       try {
         store.put('bots', updated);
@@ -1799,6 +1831,12 @@ export function createApp(
         throw error;
       }
       res.json(updated);
+    }),
+  );
+  app.put(
+    '/api/bots/:id/model',
+    wrap((req, res) => {
+      res.json(selectBotModel(store, String(req.params.id), req.body));
     }),
   );
   app.patch(
@@ -2038,10 +2076,7 @@ export function createApp(
   app.post(
     '/api/routines',
     wrap((req, res) => {
-      const r = { ...routineSchema.parse(req.body), id: randomUUID() };
-      res
-        .status(201)
-        .json(store.put('routines', { ...r, nextRun: r.enabled ? nextRun(r) : undefined }));
+      res.status(201).json(saveRoutine(store, req.body));
     }),
   );
   app.put(
@@ -2052,10 +2087,7 @@ export function createApp(
         res.status(404).json({ error: 'Routine not found' });
         return;
       }
-      const r = { ...old, ...routineSchema.parse(req.body) };
-      if (!store.get('bots', r.botId)) throw new Error('Bot not found');
-      nextRun(r);
-      res.json(store.put('routines', { ...r, nextRun: r.enabled ? nextRun(r) : undefined }));
+      res.json(saveRoutine(store, req.body, old.id));
     }),
   );
   app.post(

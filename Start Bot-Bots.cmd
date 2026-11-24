@@ -3,6 +3,7 @@ setlocal
 cd /d "%~dp0"
 set "BOT_BOTS_DATA_DIR=%CD%\data"
 set "ELECTRON_RUN_AS_NODE="
+if exist "release\0.2.21\win-unpacked\Bot-Bots.exe" goto botpanel
 if exist "release\0.2.20\win-unpacked\Bot-Bots.exe" goto publicstarter
 if exist "release\0.2.19\win-unpacked\Bot-Bots.exe" goto teamconversations
 if exist "release\0.2.18\win-unpacked\Bot-Bots.exe" goto frontiermodels
@@ -40,6 +41,9 @@ start "Bot-Bots" "node_modules\electron\dist\electron.exe" .
 exit /b 0
 :packaged
 start "Bot-Bots" "release\win-unpacked\Bot-Bots.exe"
+exit /b 0
+:botpanel
+start "Bot-Bots" "release\0.2.21\win-unpacked\Bot-Bots.exe"
 exit /b 0
 :updated
 start "Bot-Bots" "release\0.1.1\win-unpacked\Bot-Bots.exe"

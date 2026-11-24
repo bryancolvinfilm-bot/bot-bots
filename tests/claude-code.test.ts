@@ -100,11 +100,13 @@ test('Claude browser-login inference preserves bot tool requests, disables nativ
     tools,
     1000,
     new AbortController().signal,
+    'high',
   );
   assert.equal(result.message.tool_calls![0].function.name, 'save_note');
   assert.equal(result.tokens, 22);
   assert.ok(calls[0].input.includes('Only follow this bot'));
   assert.equal(calls[0].args[calls[0].args.indexOf('--tools') + 1], '');
+  assert.equal(calls[0].args[calls[0].args.indexOf('--effort') + 1], 'high');
   assert.equal(calls[0].args.includes('--dangerously-skip-permissions'), false);
   invented = true;
   await assert.rejects(

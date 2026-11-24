@@ -32,11 +32,12 @@ export function rankModels(
   assessments: Assessment[],
   task: TaskType,
   preferred?: string | null,
-  context: { botId?: string; urgency?: Urgency } = {},
+  context: { botId?: string; urgency?: Urgency; providerId?: string | null } = {},
 ) {
   const eligible = models.filter(
     (m) =>
       m.enabled &&
+      (!context.providerId || m.providerId === context.providerId) &&
       (!m.modelType || m.modelType === 'llm') &&
       providers.some(
         (p) =>

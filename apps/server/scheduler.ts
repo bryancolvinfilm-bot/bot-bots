@@ -1,6 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 import type { Routine } from '../../packages/shared/types';
-import { Runtime } from './runtime';
+import type { Runtime } from './runtime';
 import { Store } from './store';
 export function nextRun(routine: Pick<Routine, 'cron' | 'timezone'>, date = new Date()) {
   return CronExpressionParser.parse(routine.cron, { tz: routine.timezone, currentDate: date })

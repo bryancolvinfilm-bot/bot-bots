@@ -205,6 +205,7 @@ export class ClaudeCode {
     tools: any[],
     maxTokens: number,
     caller: AbortSignal,
+    effort?: import('../../packages/shared/model-effort').ReasoningEffort,
   ): Promise<Completion> {
     if (!/^[a-z0-9][a-z0-9_.:/\[\]-]{0,159}$/i.test(model))
       throw Error('Choose a valid Claude model.');
@@ -256,6 +257,7 @@ export class ClaudeCode {
         '3',
         '--model',
         model,
+        ...(effort ? ['--effort', effort] : []),
       ];
       const prompt = `Act as the bot described by the supplied system instructions. Return text and/or requests to the listed Bot-Bots functions using the JSON schema. Function arguments must be a JSON string. Calls are executed by Bot-Bots, which returns results in the next request. Your native tools are disabled for this invocation. Do not claim a requested function succeeded until its recorded result is present.\n${JSON.stringify({ messages, functions: tools })}`;
       const result = await this.run(args, prompt, AbortSignal.any([caller, controller.signal]), {

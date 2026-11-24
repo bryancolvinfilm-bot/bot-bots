@@ -41,6 +41,7 @@ import { ArtifactCard } from './ArtifactCard';
 import type { DraftSummary } from '../../../packages/shared/drafts';
 import { DraftCard } from './DraftCard';
 import { BotPanel } from './BotPanel';
+import { ChatModelControls } from './BotModels';
 import { TaskJourney } from './TaskJourney';
 import { LiveBuilds } from './LiveBuilds';
 import {
@@ -309,6 +310,7 @@ export function Chat({
         {
           botId: bot.id,
           prompt: text,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           clientMessageId,
           conversationId,
           ...(run?.status === 'running' ? {} : jobOptions),
@@ -437,7 +439,7 @@ export function Chat({
     data.assessments,
     jobOptions.task ?? classifyTask(previewPrompt),
     bot.modelId,
-    { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency },
+    { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency, providerId: bot.providerId },
   ).find((m) => m.status !== 'offline');
   const usedModel =
     run?.status === 'running' ? data.models.find((m) => m.id === run.modelId) : undefined;
@@ -875,6 +877,7 @@ export function Chat({
             }}
           >
             <div className="composer">
+              <ChatModelControls bot={bot} data={data} model={nextModel} refresh={refresh} />
               {!!plannedHandoffs.length && (
                 <small className="delivery-plan">
                   Sends a handoff to{' '}

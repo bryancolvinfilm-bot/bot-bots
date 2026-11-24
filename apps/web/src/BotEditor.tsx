@@ -6,6 +6,7 @@ import { api } from './api';
 import type { BotCategory, ProcessingPhrases, PhraseContext } from '../../../packages/shared/team';
 
 import { Field, Modal } from './ui';
+import { BotModelPicker } from './BotModels';
 export function BotEditor({
   bot,
   data,
@@ -152,22 +153,7 @@ export function BotEditor({
                 onChange={(e) => setB({ ...b, description: e.target.value })}
               />
             </Field>
-            <Field label="Model preference">
-              <select
-                value={b.modelId ?? ''}
-                onChange={(e) => setB({ ...b, modelId: e.target.value || null })}
-              >
-                <option value="">Auto · use the team’s router</option>
-                {data.models
-                  .filter((m) => m.enabled)
-                  .map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-              </select>
-              <small>A preferred model is tried first; automatic failover still applies.</small>
-            </Field>
+            <BotModelPicker bot={b} data={data} change={setB} />
             <label className="checkbox-label">
               <input
                 type="checkbox"

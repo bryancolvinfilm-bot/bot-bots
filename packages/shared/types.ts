@@ -27,9 +27,11 @@ export interface Bot {
   instructions: string;
   avatar: Avatar;
   modelId: string | null;
+  providerId?: string | null;
+  reasoningEffort?: import('./model-effort').ReasoningEffort | null;
   enabled: boolean;
   sourceFile?: string;
-  categoryId?: string;
+  categoryId?: string | null;
   isPrototype?: boolean;
   prototypeId?: string;
   cloneTaskId?: string;
@@ -42,6 +44,7 @@ export interface Bot {
 export type TaskType = 'general' | 'research' | 'coding' | 'writing' | 'planning';
 export type Urgency = 'relaxed' | 'soon' | 'urgent';
 export interface JobOptions {
+  timezone?: string;
   urgency?: Urgency;
   importance?: 'normal' | 'high';
   task?: TaskType;
@@ -118,7 +121,7 @@ export interface Model {
   lastError?: string;
   lastSeen?: string;
   contextTokens: number;
-  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+  reasoningEffort?: import('./model-effort').ReasoningEffort;
 }
 export interface Message {
   deliveryId?: string;
@@ -233,6 +236,9 @@ export interface SteeringMessage {
   appliedWorkIds: string[];
 }
 export interface Run {
+  /** Set only by the server from the human's authenticated role. */
+  panelAccess?: boolean;
+  timezone?: string;
   id: string;
   origin?: 'chat' | 'routine';
   botId: string;

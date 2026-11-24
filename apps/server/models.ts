@@ -184,7 +184,10 @@ export function candidates(
     store.assessments(),
     task,
     preferred,
-    context,
+    {
+      ...context,
+      providerId: context.botId ? store.get('bots', context.botId)?.providerId : undefined,
+    },
   );
 }
 export interface WireMessage {
@@ -253,7 +256,14 @@ export async function complete(
   if (p.kind === 'claude-code') {
     const claude = credentials && claudeConnections.get(credentials);
     if (!claude) throw Error('Connect Claude in Model workshop first.');
-    return claude.complete(m.name, messages, tools, maxTokens, AbortSignal.any([signal, AbortSignal.timeout(p.timeoutMs)]));
+    return claude.complete(
+      m.name,
+      messages,
+      tools,
+      maxTokens,
+      AbortSignal.any([signal, AbortSignal.timeout(p.timeoutMs)]),
+      m.reasoningEffort,
+    );
   }
   if (p.kind === 'chatgpt') {
     const auth = credentials && chatGPTConnections.get(credentials);
@@ -412,6 +422,7 @@ export async function completeAnthropic(
       system,
       messages: input,
       max_tokens: maxTokens,
+      ...(m.reasoningEffort ? { output_config: { effort: m.reasoningEffort } } : {}),
       ...(tools.length
         ? {
             tools: (tools as FunctionTool[]).map((t) => ({
