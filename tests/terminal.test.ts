@@ -19,9 +19,10 @@ const command =
   process.platform === 'win32'
     ? "[IO.File]::WriteAllText((Join-Path (Get-Location) 'marker.txt'), 'approved'); Write-Output 'Terminal check passed'"
     : "printf approved > marker.txt; printf 'Terminal check passed'";
+const shellTestTimeout = process.platform === 'win32' ? 120000 : 10000;
 async function waitJob(terminal: Terminal, id: string) {
-  // Windows CI can take several seconds to cold-start PowerShell under parallel test load.
-  const deadline = Date.now() + 30000;
+  // Hosted Windows runners can take tens of seconds to cold-start Windows PowerShell.
+  const deadline = Date.now() + shellTestTimeout;
   while (Date.now() < deadline) {
     const j = terminal.store.get('terminal', id)!;
     if (!['running', 'awaiting-approval'].includes(j.status)) return j;
@@ -77,7 +78,7 @@ test('approval executes the immutable command once, records output, and each new
       command,
       '.',
       'Test an approved command',
-      process.platform === 'win32' ? 30000 : 10000,
+      shellTestTimeout,
       'worker1',
       'run1',
       new AbortController().signal,
