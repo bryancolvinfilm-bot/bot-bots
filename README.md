@@ -40,6 +40,8 @@ Every chat has a model/effort picker: connected online models appear first, foll
 
 Online providers manage their context capacity by default, with an optional manual app cap. Local models follow the actual loaded context reported by their server. Automatic working-context compaction preserves the current request and completed results while retaining the full visible history and local checkpoints.
 
+Click the model indicator in the top bar to apply a model and effort to the whole team once, or return all bots to their saved profile defaults. Individual chats can change afterward. Token counters beside messages show live estimates while responding and provider-reported usage when available, including model calls for tools and context compaction.
+
 ## Team spaces and collaboration
 
 One conversation list serves the whole team. Each conversation contains one chat per bot. Switching conversations changes every bot's history together. Handoffs reuse the recipient's chat in that space, with recorded task receipts and results. Recent team context stays within the selected space.

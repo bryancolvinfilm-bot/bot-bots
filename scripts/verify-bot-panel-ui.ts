@@ -23,6 +23,21 @@ const model = createServer(async (req, res) => {
     '\n\n[HOST ACTION ADAPTER]',
   )[0];
   const routine = store.all('routines').find((r) => r.name === 'Morning check');
+  if (prompt.includes('TOKEN_STREAM_PROBE')) {
+    assert.equal(body.stream, true);
+    res.setHeader('Content-Type', 'text/event-stream');
+    for (let part = 0; part < 5; part++) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (res.destroyed) return;
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'Streaming token progress. '.repeat(4) } }] })}\n\n`,
+      );
+    }
+    res.end(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: 'TOKEN_STREAM_DONE' }, finish_reason: 'stop' }] })}\n\ndata: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 150, total_tokens: 250 } })}\n\ndata: [DONE]\n\n`,
+    );
+    return;
+  }
   const action = /remove/i.test(prompt)
     ? { action: 'routine_delete', id: routine?.id }
     : /pause/i.test(prompt)
@@ -226,6 +241,58 @@ try {
   assert.equal(await page.getByLabel('Chat model', { exact: true }).inputValue(), 'test-chatgpt-b');
   assert.equal(await page.getByLabel('Reasoning effort', { exact: true }).inputValue(), 'high');
   await page.screenshot({ path: join(dir, 'chat-model-and-effort.png') });
+  async function streamTokens(label: string) {
+    const before = store.all('runs').length;
+    await page
+      .getByRole('textbox', { name: 'Message Calendar', exact: true })
+      .fill(`TOKEN_STREAM_PROBE ${label}`);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    const live = page.getByLabel('Live response tokens', { exact: true }).last();
+    await live.waitFor();
+    await until(async () => Number(await live.getAttribute('data-token-output')) > 0);
+    const first = Number(await live.getAttribute('data-token-output'));
+    await until(async () => Number(await live.getAttribute('data-token-output')) > first);
+    await page.screenshot({ path: join(dir, `live-token-counter-${label}.png`) });
+    await until(
+      () =>
+        store.all('runs').length > before && store.all('runs').every((r) => r.status !== 'running'),
+    );
+    const final = page
+      .locator('.message.assistant')
+      .filter({ hasText: 'TOKEN_STREAM_DONE' })
+      .last()
+      .getByLabel('Response tokens', { exact: true });
+    await final.waitFor();
+    assert.equal(await final.getAttribute('data-token-total'), '250');
+    assert.equal(await final.getAttribute('data-token-output'), '150');
+    assert.ok(await page.getByLabel('Message tokens', { exact: true }).last().isVisible());
+  }
+  await streamTokens('online');
+  await page.getByRole('button', { name: 'Choose model for all bots', exact: true }).click();
+  let team = page.getByRole('dialog', { name: 'Team model', exact: true });
+  await team.getByLabel('Team model', { exact: true }).selectOption('test-chatgpt-b');
+  await team.getByLabel('Team effort', { exact: true }).selectOption('high');
+  await team.getByRole('button', { name: 'Use for all bots', exact: true }).click();
+  await until(() => store.all('bots').every((b) => b.chatModelId === 'test-chatgpt-b'));
+  await team.getByRole('status').waitFor();
+  await page.screenshot({ path: join(dir, 'team-model-applied.png') });
+  await team.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await until(
+    async () =>
+      (await page.getByLabel('Chat model', { exact: true }).inputValue()) === 'test-chatgpt-b',
+  );
+  await page.getByLabel('Chat model', { exact: true }).selectOption(chosen.id);
+  await until(() => currentChannel().modelId === chosen.id);
+  assert.equal(store.get('bots', 'research')?.chatModelId, 'test-chatgpt-b');
+  await streamTokens('local');
+  await page.getByRole('button', { name: 'Choose model for all bots', exact: true }).click();
+  team = page.getByRole('dialog', { name: 'Team model', exact: true });
+  await team.getByRole('button', { name: 'Return all to defaults', exact: true }).click();
+  await until(() => store.all('bots').every((b) => b.chatModelId === undefined));
+  await team.getByRole('status').waitFor();
+  await team.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  assert.deepEqual(store.get('bots', 'calendar'), originalBot);
+  assert.equal(currentChannel().modelId, undefined);
   await page.getByLabel('Chat model', { exact: true }).selectOption(chosen.id);
   await until(() => currentChannel().modelId === chosen.id);
   assert.ok((await page.locator('.chat-context-status').innerText()).includes('122,112'));
@@ -258,6 +325,10 @@ try {
         unloadedModelsHidden: true,
         oneModelStillHasDropdown: true,
         botDefaultsUnchanged: true,
+        liveTokensOnlineAndLocal: true,
+        providerTotalsPersist: true,
+        teamSwitchAndReset: true,
+        individualOverrideAfterTeamSwitch: true,
         errors,
       },
       null,

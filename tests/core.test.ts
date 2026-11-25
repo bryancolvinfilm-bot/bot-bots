@@ -76,7 +76,7 @@ test('team activity streams real run transitions and shuts down cleanly', async 
     assert.equal(update.run.status, 'running');
     assert.equal((await finished).status, 'failed');
     let final = update;
-    while (final.run.status === 'running') final = await next();
+    while (final.type !== 'run' || final.run.status === 'running') final = await next();
     assert.equal(final.run.status, 'failed');
     runtime.events.emit('shutdown');
     await reader.cancel();

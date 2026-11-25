@@ -60,6 +60,8 @@ import { notebookTools, OutputRecovery } from './output-recovery';
 import { ContextManager, contextTokens } from './context-manager';
 import { ProviderContextError, ContextBudgetError } from './generation-errors';
 import { effortOptions } from '../../packages/shared/model-effort';
+import { TokenMeter } from './token-meter';
+import type { UsageUpdate } from '../../packages/shared/token-usage';
 import { Semaphore } from './semaphore';
 import { tasksFor } from './team';
 import { z } from 'zod';
@@ -359,6 +361,7 @@ export class Runtime {
   private active = 0;
   private controls: BotControls;
   private contexts: ContextManager;
+  private modelChanges = new Set<string>();
   private inference = new Semaphore(() => this.store.settings().maxParallelModels ?? 2);
   constructor(
     public store: Store,
@@ -621,7 +624,26 @@ export class Runtime {
           .find((c) => c.botId === bot.id && c.spaceId === channel!.spaceId) ?? channel;
     return channel?.botId === bot.id && channel.modelId !== undefined
       ? { modelId: channel.modelId, reasoningEffort: channel.reasoningEffort, explicit: true }
-      : { modelId: bot.modelId, reasoningEffort: bot.reasoningEffort, explicit: false };
+      : {
+          modelId: bot.chatModelId ?? bot.modelId,
+          reasoningEffort: bot.chatModelId ? bot.chatReasoningEffort : bot.reasoningEffort,
+          explicit: false,
+        };
+  }
+
+  private usageChanged(run: Run, work: WorkRecord) {
+    run.revision = (run.revision ?? 0) + 1;
+    work.usageRevision = run.revision;
+    const update: UsageUpdate = {
+      type: 'usage',
+      runId: run.id,
+      workId: work.id,
+      revision: run.revision,
+      usage: work.usage,
+      liveUsage: work.liveUsage,
+    };
+    this.events.emit(run.id, update);
+    this.events.emit('usage', update);
   }
 
   modelSelectionChanged(conversationId: string) {
@@ -638,8 +660,10 @@ export class Runtime {
           (channelId === conversationId ||
             (!!conversation.spaceId &&
               this.store.get('conversations', channelId ?? '')?.spaceId === conversation.spaceId))
-        )
+        ) {
+          this.modelChanges.add(work.id);
           this.generation.get(work.id)?.controller.abort();
+        }
       }
     }
   }
@@ -694,9 +718,10 @@ export class Runtime {
       }
       const owner = this.store.get('bots', record.botId);
       const selection = this.modelPreference(run, owner!, handoffId);
+      const changedModel = this.modelChanges.delete(record.id);
       const preferredModel = selection.modelId
         ? this.store.get('models', selection.modelId)
-        : selection.explicit
+        : selection.explicit || changedModel
           ? candidates(this.store, record.task, null, { botId: record.botId }).find(
               (m) => m.status === 'online',
             )
@@ -787,6 +812,7 @@ export class Runtime {
       const count = run.steering?.length ?? 0,
         controller = new AbortController();
       let started: number | undefined;
+      let meter: TokenMeter | undefined;
       this.generation.set(record.id, { runId: run.id, controller });
       try {
         const compacted = await this.contexts.prepare({
@@ -822,11 +848,15 @@ export class Runtime {
           },
           summarize: async (summaryMessages, maxTokens) => {
             const startedSummary = performance.now();
+            let summaryMeter: TokenMeter | undefined;
             try {
               const summary = await this.inference.use(
                 AbortSignal.any([signal, controller.signal]),
-                () =>
-                  complete(
+                async () => {
+                  summaryMeter = new TokenMeter(record, contextTokens(summaryMessages), () =>
+                    this.usageChanged(run, record),
+                  );
+                  const result = await complete(
                     currentProvider,
                     {
                       ...latest,
@@ -841,7 +871,11 @@ export class Runtime {
                     maxTokens,
                     AbortSignal.any([signal, controller.signal]),
                     this.credentials,
-                  ),
+                    (snapshot) => summaryMeter!.observe(snapshot),
+                  );
+                  summaryMeter.finish(result);
+                  return result;
+                },
               );
               const tokens = summary.tokens ?? 0;
               run.tokens += tokens;
@@ -853,6 +887,7 @@ export class Runtime {
                 );
               return summary.message.content;
             } finally {
+              summaryMeter?.finish();
               attempt.modelTimeMs += performance.now() - startedSummary;
             }
           },
@@ -868,6 +903,10 @@ export class Runtime {
             this.event(run, 'progress', record.botId, 'Working on the next step', { handoffId });
             started = performance.now();
             attempt.calls++;
+            meter = new TokenMeter(record, contextTokens(wireMessages, activeTools), () =>
+              this.usageChanged(run, record),
+            );
+            const buildObserver = this.builds.observer(run, record);
             return complete(
               currentProvider,
               emptyRetries && currentProvider.local
@@ -878,10 +917,14 @@ export class Runtime {
               this.store.settings().maxOutputTokens,
               AbortSignal.any([signal, controller.signal]),
               this.credentials,
-              this.builds.observer(run, record),
+              (snapshot) => {
+                meter!.observe(snapshot);
+                buildObserver(snapshot);
+              },
             );
           },
         );
+        meter?.finish(response);
         const reported =
           typeof response.tokens === 'number' &&
           Number.isFinite(response.tokens) &&
@@ -973,6 +1016,7 @@ export class Runtime {
         if (signal.aborted || !controller.signal.aborted) throw error;
         // Human steering interrupts generation, not model health or already executed tools.
       } finally {
+        meter?.finish();
         record.queued = false;
         attempt.modelTimeMs += started === undefined ? 0 : Math.round(performance.now() - started);
         if (this.generation.get(record.id)?.controller === controller)
@@ -1254,6 +1298,7 @@ SHARED SKILLS (use skill_read to load): ${this.help
       record.finishedAt = new Date().toISOString();
       if (record.context) record.context.status = 'ready';
       this.contexts.end(record.id);
+      this.modelChanges.delete(record.id);
       this.computer.releaseWork(bot.id, run.id, handoffId);
       this.builds.finish(record.id);
       this.store.put('tasks', {

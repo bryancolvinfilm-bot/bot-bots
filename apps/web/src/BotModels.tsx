@@ -41,12 +41,17 @@ export function ChatModelControls({
   );
   const online = choices.filter((m) => !data.providers.find((p) => p.id === m.providerId)?.local);
   const local = choices.filter((m) => data.providers.find((p) => p.id === m.providerId)?.local);
-  const preference = conversation?.modelId !== undefined ? conversation.modelId : bot.modelId;
+  const preference =
+    conversation?.modelId !== undefined ? conversation.modelId : (bot.chatModelId ?? bot.modelId);
   const selected = choices.find((m) => m.id === preference) ?? model ?? choices[0];
   const provider = data.providers.find((p) => p.id === selected?.providerId);
   const efforts = effortOptions(selected, provider);
   const inheritedEffort =
-    conversation?.modelId !== undefined ? conversation.reasoningEffort : bot.reasoningEffort;
+    conversation?.modelId !== undefined
+      ? conversation.reasoningEffort
+      : bot.chatModelId
+        ? bot.chatReasoningEffort
+        : bot.reasoningEffort;
   const effort = preference && selected?.id !== preference ? null : inheritedEffort;
   const disabled =
     busy || data.accessRole === 'viewer' || !conversation || bot.cloneStatus === 'retired';

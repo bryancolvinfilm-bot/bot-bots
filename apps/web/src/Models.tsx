@@ -12,9 +12,11 @@ import { Field, Heading, Modal } from './ui';
 export function Models({
   data,
   act,
+  openTeamModels,
 }: {
   data: Bootstrap;
   act: (fn: () => Promise<unknown>, message?: string) => Promise<void>;
+  openTeamModels?: () => void;
 }) {
   const [provider, setProvider] = useState<Provider | null>();
   const [model, setModel] = useState<Model>();
@@ -33,6 +35,11 @@ export function Models({
         title="Model workshop"
         description="A home for models on this machine, across your network, and in the cloud."
       >
+        {(!data.accessRole || data.accessRole === 'owner') && (
+          <button className="secondary" onClick={openTeamModels}>
+            Choose model for all bots
+          </button>
+        )}
         {(!data.accessRole || data.accessRole === 'owner') && (
           <button className="secondary" onClick={() => openCredentials()}>
             Keys & passwords

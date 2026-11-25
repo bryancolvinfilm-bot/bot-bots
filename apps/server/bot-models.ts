@@ -12,6 +12,59 @@ export const modelSelectionSchema = z
   })
   .strict();
 
+export function selectTeamModel(store: Store, input: unknown) {
+  const value = z
+    .object({
+      action: z.enum(['apply', 'reset']),
+      modelId: z.string().min(1).max(300).optional(),
+      reasoningEffort: z.enum(EFFORTS).nullable().optional(),
+    })
+    .strict()
+    .parse(input);
+  const model = value.modelId ? store.get('models', value.modelId) : undefined;
+  const provider = model && store.get('providers', model.providerId);
+  if (value.action === 'apply') {
+    if (!model || !runningChatModels([model], store.all('providers')).length)
+      throw Error('Choose a currently running or connected model.');
+    if (value.reasoningEffort && !effortOptions(model, provider).includes(value.reasoningEffort))
+      throw Error('Choose an effort level supported by this model.');
+  }
+  const bots = store
+    .all('bots')
+    .filter((bot) => !bot.deletedAt && !bot.archivedAt && bot.cloneStatus !== 'retired');
+  const ids = new Set(bots.map((bot) => bot.id));
+  const channels = store.all('conversations').filter((channel) => ids.has(channel.botId));
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    if (value.action === 'apply' && model && provider) {
+      store.put('models', { ...model, enabled: true, enablement: 'manual' });
+      if (!provider.local) store.setConfig('settings', { ...store.settings(), localOnly: false });
+    }
+    for (const bot of bots)
+      store.put('bots', {
+        ...bot,
+        chatModelId: value.action === 'apply' ? model!.id : undefined,
+        chatReasoningEffort: value.action === 'apply' ? (value.reasoningEffort ?? null) : undefined,
+      });
+    for (const channel of channels)
+      store.put('conversations', {
+        ...channel,
+        modelId: value.action === 'apply' ? model!.id : undefined,
+        reasoningEffort: value.action === 'apply' ? (value.reasoningEffort ?? null) : undefined,
+      });
+    store.setConfig('model-selection-revision', crypto.randomUUID());
+    store.db.exec('COMMIT');
+    return {
+      bots: bots.length,
+      conversations: channels.length,
+      conversationIds: channels.map((c) => c.id),
+    };
+  } catch (error) {
+    store.db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export function selectConversationModel(
   store: Store,
   conversationId: string,
@@ -97,7 +150,14 @@ export function selectBotModel(
       const chosen = model ?? catalog.find((m) => m.enabled) ?? catalog[0];
       if (chosen) store.put('models', { ...chosen, enabled: true, enablement: 'manual' });
     }
-    const saved = store.put('bots', { ...bot, providerId, modelId, reasoningEffort: effort });
+    const saved = store.put('bots', {
+      ...bot,
+      providerId,
+      modelId,
+      reasoningEffort: effort,
+      chatModelId: undefined,
+      chatReasoningEffort: undefined,
+    });
     if (store.settings().mainBotId === bot.id && !canBeMainBot(saved))
       store.setConfig('settings', { ...store.settings(), mainBotId: null });
     store.db.exec('COMMIT');

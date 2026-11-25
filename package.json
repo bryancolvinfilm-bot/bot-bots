@@ -1,6 +1,6 @@
 {
   "name": "bot-bots",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "private": true,
   "type": "module",
   "description": "Local-first, model-independent bot team and desktop app",
@@ -54,7 +54,7 @@
     "appId": "com.botbots.desktop",
     "productName": "Bot-Bots",
     "directories": {
-      "output": "release/0.2.23"
+      "output": "release/0.2.24"
     },
     "files": [
       "dist/**/*",

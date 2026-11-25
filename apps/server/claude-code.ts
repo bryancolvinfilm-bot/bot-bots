@@ -4,6 +4,14 @@ import { existsSync, mkdirSync, renameSync, writeFileSync, chmodSync } from 'nod
 import { join } from 'node:path';
 import type { Completion, WireMessage } from './models';
 import { providerContextError } from './generation-errors';
+import { StringDecoder } from 'node:string_decoder';
+import { AnthropicStream } from './anthropic-stream';
+import type { CompletionProgress } from './chat-stream';
+import {
+  addTokenUsage,
+  providerTokenUsage,
+  type TokenUsage,
+} from '../../packages/shared/token-usage';
 
 const downloads = 'https://downloads.claude.ai/claude-code-releases';
 export interface ClaudeCodeState {
@@ -85,6 +93,7 @@ export class ClaudeCode {
     input = '',
     signal = AbortSignal.timeout(15000),
     extraEnv: Record<string, string> = {},
+    onFrame?: (frame: any) => void,
   ) {
     return new Promise<{ code: number; output: string }>((resolve, reject) => {
       const child = spawn(this.binary, args, {
@@ -95,11 +104,32 @@ export class ClaudeCode {
         signal,
       });
       let output = '',
-        size = 0;
+        size = 0,
+        pending = '';
+      const decoder = new StringDecoder('utf8');
+      const line = (text: string) => {
+        if (!text.trim()) return;
+        const frame = JSON.parse(text);
+        // Keep only the terminal receipt. Thinking/verbose frames are never saved.
+        if (frame.type === 'result') output = JSON.stringify(frame);
+        onFrame?.(frame);
+      };
       child.stdout.on('data', (chunk) => {
         size += chunk.length;
         if (size > 24 * 1024 * 1024) child.kill();
-        else output += chunk.toString();
+        else if (onFrame) {
+          try {
+            pending += decoder.write(chunk);
+            let end: number;
+            while ((end = pending.indexOf('\n')) >= 0) {
+              line(pending.slice(0, end));
+              pending = pending.slice(end + 1);
+            }
+          } catch {
+            child.kill();
+            reject(Error('Claude Code returned an invalid response stream.'));
+          }
+        } else output += decoder.write(chunk);
       });
       child.stderr.on('data', () => {});
       child.once('error', () =>
@@ -111,7 +141,17 @@ export class ClaudeCode {
           ),
         ),
       );
-      child.once('close', (code) => resolve({ code: code ?? 1, output }));
+      child.once('close', (code) => {
+        try {
+          if (onFrame) {
+            pending += decoder.end();
+            if (pending.trim()) line(pending);
+          } else output += decoder.end();
+          resolve({ code: code ?? 1, output });
+        } catch {
+          reject(Error('Claude Code returned an invalid response stream.'));
+        }
+      });
       child.stdin.on('error', () => {});
       child.stdin.end(input);
     });
@@ -207,6 +247,7 @@ export class ClaudeCode {
     maxTokens: number,
     caller: AbortSignal,
     effort?: import('../../packages/shared/model-effort').ReasoningEffort,
+    progress?: (snapshot: CompletionProgress) => void,
   ): Promise<Completion> {
     if (!/^[a-z0-9][a-z0-9_.:/\[\]-]{0,159}$/i.test(model))
       throw Error('Choose a valid Claude model.');
@@ -261,9 +302,37 @@ export class ClaudeCode {
         ...(effort ? ['--effort', effort] : []),
       ];
       const prompt = `Act as the bot described by the supplied system instructions. Return text and/or requests to the listed Bot-Bots functions using the JSON schema. Function arguments must be a JSON string. Calls are executed by Bot-Bots, which returns results in the next request. Your native tools are disabled for this invocation. Do not claim a requested function succeeded until its recorded result is present.\n${JSON.stringify({ messages, functions: tools })}`;
-      const result = await this.run(args, prompt, AbortSignal.any([caller, controller.signal]), {
-        CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxTokens),
-      });
+      if (progress) {
+        args[args.indexOf('--output-format') + 1] = 'stream-json';
+        args.push('--verbose', '--include-partial-messages');
+      }
+      let stream: AnthropicStream | undefined, completed: TokenUsage | undefined;
+      const result = await this.run(
+        args,
+        prompt,
+        AbortSignal.any([caller, controller.signal]),
+        {
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxTokens),
+        },
+        progress
+          ? (frame) => {
+              if (frame.type === 'stream_event') {
+                if (frame.event?.type === 'message_start') stream = new AnthropicStream();
+                if (stream) {
+                  stream.accept(frame.event);
+                  const snapshot = stream.snapshot();
+                  progress({ ...snapshot, usage: addTokenUsage(completed, snapshot.usage) });
+                  if (frame.event?.type === 'message_stop') {
+                    completed = addTokenUsage(completed, snapshot.usage);
+                    stream = undefined;
+                  }
+                }
+              }
+              if (frame.type === 'result')
+                progress({ text: '', toolCalls: [], usage: providerTokenUsage(frame.usage, true) });
+            }
+          : undefined,
+      );
       let data: any;
       try {
         data = JSON.parse(result.output);
@@ -271,7 +340,9 @@ export class ClaudeCode {
         throw Error('Claude Code returned an incomplete response.');
       }
       if (result.code || data.is_error) {
-        const contextError = providerContextError(JSON.stringify([data.result, data.error, data.errors]));
+        const contextError = providerContextError(
+          JSON.stringify([data.result, data.error, data.errors]),
+        );
         if (contextError) throw contextError;
         throw Error(
           'Claude Code could not complete this request. Check the account connection and plan usage limits.',
@@ -308,12 +379,8 @@ export class ClaudeCode {
       return {
         message: { role: 'assistant', content: answer.text || null, tool_calls: calls },
         truncated: false,
-        tokens: usage
-          ? (usage.input_tokens ?? 0) +
-            (usage.output_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0)
-          : undefined,
+        tokens: providerTokenUsage(usage, true)?.total,
+        usage: providerTokenUsage(usage, true),
         stopReason: 'stop',
       };
     } finally {

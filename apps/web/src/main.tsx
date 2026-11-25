@@ -41,6 +41,8 @@ import { BotRoster } from './BotSidebar';
 import { useLiveActivity } from './useActivity';
 import { Chat } from './Chat';
 import { Models } from './Models';
+import { TeamModels } from './TeamModels';
+import { applyUsageUpdate } from '../../../packages/shared/token-usage';
 import { Routines } from './Routines';
 import { ServerDialog, SettingsView } from './SettingsView';
 import './theme.css';
@@ -100,6 +102,7 @@ function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [serverDialog, setServerDialog] = useState(false);
+  const [teamModelsOpen, setTeamModelsOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [computerOpen, setComputerOpen] = useState(false);
   const [computer, setComputer] = useState<ComputerState>();
@@ -149,6 +152,11 @@ function App() {
       if (!current) return current;
       if (update.type === 'models')
         return { ...current, models: update.models, providers: update.providers };
+      if (update.type === 'usage')
+        return {
+          ...current,
+          runs: current.runs.map((run) => applyUsageUpdate(run, update) ?? run),
+        };
       const incoming = update.type === 'snapshot' ? update.runs : [update.run];
       const activeIds = new Set(incoming.map((run) => run.id));
       const runs = new Map(
@@ -505,7 +513,8 @@ function App() {
             )}
             <button
               className={`connection-pill ${online ? '' : 'offline'}`}
-              onClick={() => setView('models')}
+              onClick={() => setTeamModelsOpen(true)}
+              aria-label="Choose model for all bots"
             >
               <span className="green-dot" />
               {online
@@ -569,7 +578,9 @@ function App() {
                 }}
               />
             )}
-            {view === 'models' && <Models data={data} act={act} />}
+            {view === 'models' && (
+              <Models data={data} act={act} openTeamModels={() => setTeamModelsOpen(true)} />
+            )}
             {view === 'plugins' && <Plugins data={data} notify={setToast} />}
             {view === 'routines' && (
               <Routines
@@ -601,7 +612,7 @@ function App() {
         open={computerOpen}
         close={() => setComputerOpen(false)}
         bots={data?.bots ?? []}
-        blocked={menu || editing !== undefined || serverDialog}
+        blocked={menu || editing !== undefined || serverDialog || teamModelsOpen}
         onState={setComputer}
       />
       {previewDoc && (
@@ -635,6 +646,17 @@ function App() {
       )}
       {data && <CredentialManager data={data} refresh={refresh} notify={setToast} />}
       {data && <BotActions data={data} refresh={refresh} notify={setToast} />}
+      {data && teamModelsOpen && (
+        <TeamModels
+          data={data}
+          close={() => setTeamModelsOpen(false)}
+          refresh={refresh}
+          workshop={() => {
+            setTeamModelsOpen(false);
+            setView('models');
+          }}
+        />
+      )}
       {serverDialog && <ServerDialog close={() => setServerDialog(false)} refresh={refresh} />}
       {toast && (
         <div className="toast" role="status">

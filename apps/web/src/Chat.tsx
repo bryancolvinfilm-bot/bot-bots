@@ -43,6 +43,8 @@ import type { DraftSummary } from '../../../packages/shared/drafts';
 import { DraftCard } from './DraftCard';
 import { BotPanel } from './BotPanel';
 import { ChatModelControls } from './BotModels';
+import { MessageTokens, WorkingTokens } from './TokenCounter';
+import { applyUsageUpdate } from '../../../packages/shared/token-usage';
 import { contextDescription } from '../../../packages/shared/chat-models';
 import { TaskJourney } from './TaskJourney';
 import { LiveBuilds } from './LiveBuilds';
@@ -177,6 +179,9 @@ export function Chat({
     return () => stream.current?.abort();
   }, [load]);
   useEffect(() => {
+    void load().catch((e) => notify(e.message));
+  }, [data.modelSelectionRevision]);
+  useEffect(() => {
     if (followTail.current) bottom.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, events, outbox]);
   useEffect(() => {
@@ -206,6 +211,7 @@ export function Chat({
           setEvents(event.run.events);
         }
         if (event.type === 'event') setEvents((old) => [...old, event.event]);
+        if (event.type === 'usage') setRun((old) => applyUsageUpdate(old, event));
         if (event.type === 'update') {
           setRun((old) => mergeRunState(old, event.run));
           setEvents(event.run.events);
@@ -441,7 +447,7 @@ export function Chat({
     data.settings,
     data.assessments,
     jobOptions.task ?? classifyTask(previewPrompt),
-    channel?.modelId !== undefined ? channel.modelId : bot.modelId,
+    channel?.modelId !== undefined ? channel.modelId : (bot.chatModelId ?? bot.modelId),
     { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency },
   ).find((m) => m.status !== 'offline');
   const usedModel =
@@ -650,6 +656,10 @@ export function Chat({
                             minute: '2-digit',
                           })}
                         </small>
+                        <MessageTokens
+                          message={m}
+                          run={m.runId ? runById.get(m.runId) : undefined}
+                        />
                       </div>
                       {m.senderBotId && m.deliveryId && (
                         <small className="delivery-ack">
@@ -778,6 +788,25 @@ export function Chat({
               conversationId={conversationId}
               owner={!data.accessRole || data.accessRole === 'owner'}
             />
+            {[...runById.values()]
+              .filter((r) => r.status === 'running')
+              .flatMap(
+                (r) =>
+                  r.work
+                    ?.filter(
+                      (w) =>
+                        w.botId === bot.id &&
+                        w.status === 'running' &&
+                        (!w.handoffId
+                          ? r.conversationId === conversationId
+                          : r.events.some(
+                              (e) =>
+                                e.handoff?.id === w.handoffId &&
+                                e.handoff?.conversationId === conversationId,
+                            )),
+                    )
+                    .map((w) => <WorkingTokens key={w.id} work={w} name={bot.name} />) ?? [],
+              )}
             <LiveBuilds runId={run?.id ?? historyRuns.at(-1)?.id} />
             {events.length > 0 && (
               <details className="run-trace">

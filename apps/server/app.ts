@@ -16,7 +16,7 @@ import { ChatGPTAuth } from './chatgpt-auth';
 import { TeamConversations } from './team-conversations';
 import { ClaudeCode } from './claude-code';
 import { botInput, routineInput, saveRoutine } from './bot-controls';
-import { selectBotModel, selectConversationModel } from './bot-models';
+import { selectBotModel, selectConversationModel, selectTeamModel } from './bot-models';
 import { EFFORTS } from '../../packages/shared/model-effort';
 import { migrateClaudeContexts, withClaudeContext } from './frontier-context';
 import type { Credentials } from './credentials';
@@ -67,7 +67,16 @@ const feedbackSchema = z.object({
   note: z.string().max(2000),
   updatedAt: z.string().datetime(),
 });
+const tokenUsageSchema = z.object({
+  total: z.number().nonnegative(),
+  input: z.number().nonnegative().optional(),
+  output: z.number().nonnegative().optional(),
+  estimated: z.boolean(),
+});
 const workSchema = z.object({
+  usageRevision: z.number().int().nonnegative().optional(),
+  usage: tokenUsageSchema.optional(),
+  liveUsage: tokenUsageSchema.optional(),
   context: z
     .object({
       inputTokens: z.number().nonnegative(),
@@ -1133,6 +1142,7 @@ export function createApp(
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', version, mode: 'local-first' }));
   app.get('/api/bootstrap', (_req, res) => {
     const bootstrap: Bootstrap = {
+      modelSelectionRevision: store.config<string>('model-selection-revision'),
       accessRole: res.locals.accessRole,
       categories: store.all('categories'),
       bots: store.all('bots'),
@@ -1191,6 +1201,18 @@ export function createApp(
       );
       runtime.modelSelectionChanged(conversation.id);
       res.json(conversation);
+    }),
+  );
+  app.post(
+    '/api/models/team-selection',
+    wrap((req, res) => {
+      const result = selectTeamModel(store, req.body);
+      for (const id of result.conversationIds) runtime.modelSelectionChanged(id);
+      runtime.events.emit('models', {
+        models: store.all('models'),
+        providers: store.all('providers'),
+      });
+      res.json({ bots: result.bots, conversations: result.conversations });
     }),
   );
   app.post(
@@ -1683,6 +1705,8 @@ export function createApp(
         `data: ${JSON.stringify({ type: 'run', run, bots: store.all('bots').filter((b) => b.prototypeId && run.work?.some((w) => w.botId === b.id)) })}\n\n`,
       );
     runtime.events.on('activity', listener);
+    const usage = (update: unknown) => res.write(`data: ${JSON.stringify(update)}\n\n`);
+    runtime.events.on('usage', usage);
     const catalog = (value: {
       models: import('../../packages/shared/types').Model[];
       providers: import('../../packages/shared/types').Provider[];
@@ -1696,6 +1720,7 @@ export function createApp(
     req.on('close', () => {
       clearInterval(heartbeat);
       runtime.events.off('activity', listener);
+      runtime.events.off('usage', usage);
       runtime.events.off('models', catalog);
       runtime.events.off('shutdown', shutdown);
     });
@@ -2250,6 +2275,8 @@ export function createApp(
           settings: settingsSchema,
           bots: z.array(
             botSchema.extend({
+              chatModelId: z.string().optional(),
+              chatReasoningEffort: z.enum(EFFORTS).nullable().optional(),
               id,
               sourceFile: z.string().optional(),
               prototypeId: id.optional(),

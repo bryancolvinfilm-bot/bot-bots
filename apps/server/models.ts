@@ -9,6 +9,8 @@ import { Credentials, redactSecrets } from './credentials';
 import { ChatGPTAuth } from './chatgpt-auth';
 import { ClaudeCode } from './claude-code';
 import { withClaudeContext } from './frontier-context';
+import { providerTokenUsage, type TokenUsage } from '../../packages/shared/token-usage';
+import { readAnthropicStream } from './anthropic-stream';
 const claudeConnections = new WeakMap<Credentials, ClaudeCode>();
 const storeClaude = new WeakMap<Store, ClaudeCode>();
 export function attachClaudeCode(store: Store, credentials: Credentials, claude: ClaudeCode) {
@@ -211,6 +213,7 @@ export interface ToolCall {
 }
 export interface Completion {
   message: WireMessage;
+  usage?: TokenUsage;
   tokens?: number;
   truncated: boolean;
   stopReason?: string;
@@ -286,6 +289,7 @@ export async function complete(
       maxTokens,
       AbortSignal.any([signal, AbortSignal.timeout(p.timeoutMs)]),
       m.reasoningEffort,
+      progress,
     );
   }
   if (p.kind === 'chatgpt') {
@@ -308,9 +312,9 @@ export async function complete(
     );
   }
   if (p.kind === 'anthropic')
-    return completeAnthropic(p, m, messages, tools, maxTokens, signal, credentials);
+    return completeAnthropic(p, m, messages, tools, maxTokens, signal, credentials, progress);
   if (p.kind === 'openai-responses')
-    return completeResponses(p, m, messages, tools, maxTokens, signal, credentials);
+    return completeResponses(p, m, messages, tools, maxTokens, signal, credentials, progress);
   const headers = providerHeaders(p, credentials);
   const timeout = AbortSignal.timeout(p.timeoutMs);
   const res = await fetch(`${p.baseUrl}/chat/completions`, {
@@ -373,7 +377,7 @@ export async function complete(
     ]),
   ) as {
     choices?: { message?: { content?: string; tool_calls?: ToolCall[] }; finish_reason?: string }[];
-    usage?: { total_tokens?: number };
+    usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
   };
   const choice = data.choices?.[0];
   if (!choice?.message) throw new Error('Provider returned no assistant message');
@@ -392,6 +396,7 @@ export async function complete(
       tool_calls: choice.message.tool_calls,
     } as WireMessage,
     tokens: data.usage?.total_tokens,
+    usage: providerTokenUsage(data.usage),
     truncated: choice.finish_reason === 'length',
     stopReason: choice.finish_reason,
   };
@@ -408,6 +413,7 @@ export async function completeAnthropic(
   maxTokens: number,
   signal: AbortSignal,
   credentials?: Credentials,
+  progress?: (snapshot: CompletionProgress) => void,
 ): Promise<Completion> {
   const system = messages
     .filter((x) => x.role === 'system')
@@ -448,6 +454,7 @@ export async function completeAnthropic(
       system,
       messages: input,
       max_tokens: maxTokens,
+      stream: !!progress,
       ...(m.reasoningEffort ? { output_config: { effort: m.reasoningEffort } } : {}),
       ...(tools.length
         ? {
@@ -469,9 +476,22 @@ export async function completeAnthropic(
     );
   }
   const data = JSON.parse(
-    redactSecrets(JSON.stringify(await response.json()), [
-      (headers as Record<string, string>)['x-api-key'] ?? '',
-    ]),
+    redactSecrets(
+      JSON.stringify(
+        response.headers.get('content-type')?.includes('text/event-stream')
+          ? await readAnthropicStream(response, (snapshot) =>
+              progress?.(
+                JSON.parse(
+                  redactSecrets(JSON.stringify(snapshot), [
+                    (headers as Record<string, string>)['x-api-key'] ?? '',
+                  ]),
+                ),
+              ),
+            )
+          : await response.json(),
+      ),
+      [(headers as Record<string, string>)['x-api-key'] ?? ''],
+    ),
   ) as {
     stop_reason: string;
     content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
@@ -492,7 +512,8 @@ export async function completeAnthropic(
   if (!truncated && !text && !calls.length) throw new Error('Claude returned an empty answer');
   return {
     message: { role: 'assistant', content: text || null, tool_calls: calls } as WireMessage,
-    tokens: data.usage ? data.usage.input_tokens + data.usage.output_tokens : undefined,
+    tokens: providerTokenUsage(data.usage, true)?.total,
+    usage: providerTokenUsage(data.usage, true),
     truncated,
     stopReason: data.stop_reason,
   };
@@ -550,7 +571,7 @@ export async function completeResponses(
       input,
       max_output_tokens: maxTokens,
       store: false,
-      ...(oauthToken ? { stream: true } : {}),
+      stream: !!(oauthToken || progress),
       include: ['reasoning.encrypted_content'],
       ...(m.reasoningEffort ? { reasoning: { effort: m.reasoningEffort } } : {}),
       ...(tools.length
@@ -575,9 +596,16 @@ export async function completeResponses(
   const data = JSON.parse(
     redactSecrets(
       JSON.stringify(
-        oauthToken
+        oauthToken || response.headers.get('content-type')?.includes('text/event-stream')
           ? await readResponsesStream(response, (snapshot) =>
-              progress?.(JSON.parse(redactSecrets(JSON.stringify(snapshot), [oauthToken]))),
+              progress?.(
+                JSON.parse(
+                  redactSecrets(JSON.stringify(snapshot), [
+                    oauthToken ?? '',
+                    headers.Authorization?.replace(/^Bearer /, '') ?? '',
+                  ]),
+                ),
+              ),
             )
           : await response.json(),
       ),
@@ -626,6 +654,7 @@ export async function completeResponses(
       rawOutputModelId: m.id,
     } as WireMessage,
     tokens: data.usage?.total_tokens,
+    usage: providerTokenUsage(data.usage),
     truncated,
     stopReason: data.incomplete_details?.reason ?? data.status,
   };
@@ -639,6 +668,7 @@ export async function readResponsesStream(
   let buffer = '',
     text = '',
     bytes = 0,
+    outputCharacters = 0,
     terminal: unknown;
   const decoder = new TextDecoder();
   const consume = (line: string) => {
@@ -652,10 +682,24 @@ export async function readResponsesStream(
       );
     if (event.type === 'response.output_text.delta') {
       text += event.delta ?? '';
-      progress?.({ text, toolCalls: [] });
     }
-    if (event.type === 'response.completed' || event.type === 'response.incomplete')
+    if (
+      typeof event.delta === 'string' &&
+      /(?:text|arguments|reasoning).*\.delta$/.test(event.type)
+    ) {
+      outputCharacters += event.delta.length;
+      progress?.({ text, toolCalls: [], outputTokens: Math.ceil(outputCharacters / 4) });
+    }
+    if (event.type === 'response.completed' || event.type === 'response.incomplete') {
       terminal = event.response;
+      const usage = providerTokenUsage(event.response?.usage);
+      progress?.({
+        text,
+        toolCalls: [],
+        usage,
+        outputTokens: usage?.output ?? Math.ceil(outputCharacters / 4),
+      });
+    }
   };
   try {
     while (true) {

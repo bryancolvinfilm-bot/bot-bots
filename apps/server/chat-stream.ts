@@ -1,8 +1,11 @@
 import type { ToolCall } from './models';
 import { TaskLimitError } from './generation-errors';
+import { providerTokenUsage, type TokenUsage } from '../../packages/shared/token-usage';
 export interface CompletionProgress {
   text: string;
   toolCalls: ToolCall[];
+  outputTokens?: number;
+  usage?: TokenUsage;
 }
 /** Observe visible output only. Reasoning deltas are deliberately never collected or forwarded. */
 export async function readChatStream(
@@ -16,7 +19,9 @@ export async function readChatStream(
     text = '',
     stopReason: string | undefined,
     tokens: number | undefined,
-    bytes = 0;
+    bytes = 0,
+    outputCharacters = 0;
+  let usage: TokenUsage | undefined;
   const calls = new Map<number, ToolCall>();
   const line = (input: string) => {
     if (!input.startsWith('data:')) return;
@@ -25,10 +30,17 @@ export async function readChatStream(
     const frame = JSON.parse(data);
     if (frame.error) throw Error('The model stream reported an error.');
     if (typeof frame.usage?.total_tokens === 'number') tokens = frame.usage.total_tokens;
+    usage = providerTokenUsage(frame.usage) ?? usage;
     const choice = frame.choices?.[0];
-    if (!choice) return;
+    if (!choice) {
+      if (usage)
+        progress?.({ text, toolCalls: [...calls.values()], usage, outputTokens: usage.output });
+      return;
+    }
     if (choice.finish_reason) stopReason = choice.finish_reason;
     const delta = choice.delta ?? {};
+    for (const value of [delta.content, delta.reasoning_content, delta.reasoning])
+      if (typeof value === 'string') outputCharacters += value.length;
     if (typeof delta.content === 'string') text += delta.content;
     for (const part of delta.tool_calls ?? []) {
       const index = Number(part.index ?? 0);
@@ -40,10 +52,14 @@ export async function readChatStream(
       if (part.id) call.id += part.id;
       if (part.function?.name) call.function.name += part.function.name;
       if (part.function?.arguments) call.function.arguments += part.function.arguments;
+      outputCharacters +=
+        (part.function?.arguments?.length ?? 0) + (part.function?.name?.length ?? 0);
       calls.set(index, call);
     }
     progress?.({
       text,
+      outputTokens: Math.ceil(outputCharacters / 4),
+      usage,
       toolCalls: [...calls.values()].map((call) => ({ ...call, function: { ...call.function } })),
     });
   };
@@ -76,6 +92,6 @@ export async function readChatStream(
         finish_reason: stopReason ?? 'length',
       },
     ],
-    usage: { total_tokens: tokens },
+    usage: { total_tokens: tokens, prompt_tokens: usage?.input, completion_tokens: usage?.output },
   };
 }

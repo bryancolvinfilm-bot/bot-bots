@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { Store } from '../apps/server/store';
 import { seedStarterTeam } from '../apps/server/starter-team';
 import { createApp } from '../apps/server/app';
-import { selectConversationModel } from '../apps/server/bot-models';
+import { selectConversationModel, selectTeamModel } from '../apps/server/bot-models';
 import { complete, portableMessages, type WireMessage } from '../apps/server/models';
 import { runningChatModels } from '../packages/shared/chat-models';
 import type { Model, Provider } from '../packages/shared/types';
@@ -114,9 +114,9 @@ async function fixture(handler: (body: any, res: ServerResponse) => void, local 
   const server = host.app.listen(0, '127.0.0.1');
   await new Promise<void>((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
-  async function request(path: string, body: unknown) {
+  async function request(path: string, body: unknown, method = 'PUT') {
     return fetch(base + path, {
-      method: 'PUT',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
@@ -228,6 +228,119 @@ test('chat model and effort preferences belong to the conversation and do not re
     assert.equal(
       f.store.export().conversations.find((c) => c.id === 'channel')?.modelId,
       'local-model',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a team model switch applies once across bots and spaces; individual choices remain editable and reset restores profile defaults', async () => {
+  const f = await fixture((_body, res) => res.end(JSON.stringify(reply('Ready.'))));
+  try {
+    const original = f.store.get('bots', 'boss-man')!;
+    f.store.put('bots', { ...original, id: 'another-bot', name: 'Another bot' });
+    f.store.put('bots', {
+      ...original,
+      id: 'archived-bot',
+      name: 'Archived',
+      archivedAt: new Date().toISOString(),
+    });
+    f.store.put('conversations', {
+      ...f.store.get('conversations', 'channel')!,
+      id: 'other-channel',
+      botId: 'another-bot',
+      spaceId: 'another-space',
+    });
+    f.store.put('models', { ...model, id: 'team-brain', name: 'gpt-5.1-mini', enabled: false });
+    const result = await f.request(
+      '/models/team-selection',
+      { action: 'apply', modelId: 'team-brain', reasoningEffort: 'high' },
+      'POST',
+    );
+    assert.equal(result.status, 200);
+    assert.equal(
+      f.store.get('bots', 'boss-man')?.modelId,
+      original.modelId,
+      'Profile suggestions stay saved.',
+    );
+    assert.equal(f.store.get('bots', 'another-bot')?.chatModelId, 'team-brain');
+    assert.equal(f.store.get('conversations', 'other-channel')?.modelId, 'team-brain');
+    assert.equal(f.store.get('bots', 'archived-bot')?.chatModelId, undefined);
+    await f.request('/conversations/channel/model', { modelId: model.id, reasoningEffort: 'low' });
+    assert.equal(f.store.get('conversations', 'channel')?.modelId, model.id);
+    assert.equal(f.store.get('conversations', 'other-channel')?.modelId, 'team-brain');
+    f.store.put('conversations', {
+      ...f.store.get('conversations', 'channel')!,
+      id: 'new-channel',
+      modelId: undefined,
+      reasoningEffort: undefined,
+    });
+    assert.equal(
+      f.store.get('bots', 'boss-man')?.chatModelId,
+      'team-brain',
+      'Future channels inherit the one-time bot preference.',
+    );
+    const revision = f.store.config<string>('model-selection-revision');
+    const reset = await f.request('/models/team-selection', { action: 'reset' }, 'POST');
+    assert.equal(reset.status, 200);
+    assert.deepEqual(f.store.get('bots', 'boss-man'), original);
+    for (const c of f.store.all('conversations')) assert.equal(c.modelId, undefined);
+    assert.notEqual(f.store.config<string>('model-selection-revision'), revision);
+    const before = f.store.all('bots');
+    assert.throws(
+      () => selectTeamModel(f.store, { action: 'apply', modelId: 'missing' }),
+      /currently running/,
+    );
+    assert.deepEqual(f.store.all('bots'), before);
+  } finally {
+    await f.close();
+  }
+});
+
+test('live per-work token updates precede completion, preserve provider totals and never replay a completed tool', async () => {
+  let step = 0;
+  const f = await fixture((_body, res) => {
+    if (++step === 1) {
+      res.end(
+        JSON.stringify({
+          ...call('workspace_write', { path: 'counted.txt', content: 'ONCE' }),
+          usage: { prompt_tokens: 90, completion_tokens: 10, total_tokens: 100 },
+        }),
+      );
+      return;
+    }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write(
+      'data: ' +
+        JSON.stringify({ choices: [{ delta: { content: 'Working on it. '.repeat(12) } }] }) +
+        '\n\n',
+    );
+    setTimeout(() => {
+      res.end(
+        'data: ' +
+          JSON.stringify({ choices: [{ delta: { content: 'Done.' }, finish_reason: 'stop' }] }) +
+          '\n\ndata: ' +
+          JSON.stringify({
+            usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+            choices: [],
+          }) +
+          '\n\ndata: [DONE]\n\n',
+      );
+    }, 200);
+  });
+  try {
+    const updates: any[] = [];
+    f.host.runtime.events.on('usage', (update) => updates.push(structuredClone(update)));
+    const run = await f.run('Write counted.txt once and reply.');
+    assert.equal(run.status, 'completed', run.error);
+    assert.ok(updates.some((update) => update.liveUsage?.output > 0));
+    assert.deepEqual(run.work?.[0].usage, { input: 190, output: 30, total: 220, estimated: false });
+    assert.equal(run.work?.[0].liveUsage, undefined);
+    assert.equal(readFileSync(join(f.dir, 'workspace/counted.txt'), 'utf8'), 'ONCE');
+    assert.equal(step, 2);
+    assert.ok(
+      updates.every((update) => JSON.stringify(update).length < 600),
+      'Token events must stay bounded independently of chat size.',
     );
   } finally {
     await f.close();
@@ -349,47 +462,60 @@ for (const local of [true, false])
     }
   });
 
-test('changing a chat model interrupts old inference and continues with its completed tool results', async () => {
-  let step = 0,
-    held: ServerResponse | undefined,
-    writes = 0;
-  const f = await fixture((body, res) => {
-    if (body.model === 'gpt-5.1-mini') {
-      assert.equal(body.reasoning_effort, 'low');
-      assert.ok(
-        body.messages.some((m: any) => m.role === 'tool' && m.content?.includes('receipt.txt')),
-      );
-      res.end(JSON.stringify(reply('MODEL_SWITCHED_WITH_RECEIPT')));
-      return;
-    }
-    if (++step === 1) {
-      writes++;
-      res.end(JSON.stringify(call('workspace_write', { path: 'receipt.txt', content: 'ONCE' })));
-    } else held = res;
-  });
-  try {
-    f.store.put('models', { ...model, id: 'other-model', name: 'gpt-5.1-mini' });
-    const original = f.store.get('bots', 'boss-man')!;
-    const started = f.host.runtime.create(
-      'boss-man',
-      'Write the receipt and give your answer.',
-      'channel',
-    );
-    await until(() => !!held);
-    const response = await f.request('/conversations/channel/model', {
-      modelId: 'other-model',
-      reasoningEffort: 'low',
+for (const action of ['chat', 'team', 'reset'])
+  test(`${action} model change interrupts old inference and continues with its completed tool results`, async () => {
+    let step = 0,
+      held: ServerResponse | undefined,
+      writes = 0;
+    const f = await fixture((body, res) => {
+      if (body.model === 'gpt-5.1-mini') {
+        assert.equal(body.reasoning_effort, 'low');
+        assert.ok(
+          body.messages.some((m: any) => m.role === 'tool' && m.content?.includes('receipt.txt')),
+        );
+        res.end(JSON.stringify(reply('MODEL_SWITCHED_WITH_RECEIPT')));
+        return;
+      }
+      if (++step === 1) {
+        writes++;
+        res.end(JSON.stringify(call('workspace_write', { path: 'receipt.txt', content: 'ONCE' })));
+      } else held = res;
     });
-    assert.equal(response.status, 200);
-    await until(() => f.store.get('runs', started.id)?.status !== 'running');
-    const done = f.store.get('runs', started.id)!;
-    assert.equal(done.status, 'completed', done.error);
-    assert.equal(done.modelId, 'other-model');
-    assert.equal(writes, 1);
-    assert.deepEqual(f.store.get('bots', 'boss-man'), original);
-    assert.ok(done.work?.[0].attempts.some((a) => a.status === 'switched'));
-  } finally {
-    held?.end();
-    await f.close();
-  }
-});
+    try {
+      f.store.put('models', { ...model, id: 'other-model', name: 'gpt-5.1-mini' });
+      if (action === 'reset')
+        f.store.put('bots', {
+          ...f.store.get('bots', 'boss-man')!,
+          modelId: 'other-model',
+          reasoningEffort: 'low',
+        });
+      const original = f.store.get('bots', 'boss-man')!;
+      if (action === 'reset') selectTeamModel(f.store, { action: 'apply', modelId: model.id });
+      const started = f.host.runtime.create(
+        'boss-man',
+        'Write the receipt and give your answer.',
+        'channel',
+      );
+      await until(() => !!held);
+      const response = await f.request(
+        action === 'chat' ? '/conversations/channel/model' : '/models/team-selection',
+        {
+          ...(action === 'chat' ? {} : { action: action === 'team' ? 'apply' : 'reset' }),
+          ...(action === 'reset' ? {} : { modelId: 'other-model', reasoningEffort: 'low' }),
+        },
+        action === 'chat' ? 'PUT' : 'POST',
+      );
+      assert.equal(response.status, 200);
+      await until(() => f.store.get('runs', started.id)?.status !== 'running');
+      const done = f.store.get('runs', started.id)!;
+      assert.equal(done.status, 'completed', done.error);
+      assert.equal(done.modelId, 'other-model');
+      assert.equal(writes, 1);
+      if (action !== 'team') assert.deepEqual(f.store.get('bots', 'boss-man'), original);
+      else assert.equal(f.store.get('bots', 'boss-man')?.modelId, original.modelId);
+      assert.ok(done.work?.[0].attempts.some((a) => a.status === 'switched'));
+    } finally {
+      held?.end();
+      await f.close();
+    }
+  });

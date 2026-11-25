@@ -20,6 +20,8 @@ export interface Avatar {
   accent: string;
 }
 export interface Bot {
+  chatModelId?: string;
+  chatReasoningEffort?: import('./model-effort').ReasoningEffort | null;
   id: string;
   name: string;
   title: string;
@@ -66,6 +68,9 @@ export interface ModelAttempt {
   calls: number;
 }
 export interface WorkRecord {
+  usageRevision?: number;
+  usage?: import('./token-usage').TokenUsage;
+  liveUsage?: import('./token-usage').TokenUsage;
   context?: {
     inputTokens: number;
     windowTokens?: number;
@@ -274,6 +279,7 @@ export interface Run {
   revision?: number;
 }
 export type ActivityUpdate = (
+  | import('./token-usage').UsageUpdate
   | { type: 'snapshot'; runs: Run[] }
   | { type: 'run'; run: Run }
   | { type: 'models'; models: Model[]; providers: Provider[] }
@@ -347,6 +353,7 @@ export interface Assessment {
   worthTheWait?: number;
 }
 export interface Bootstrap {
+  modelSelectionRevision?: string;
   accessRole?: 'owner' | 'operator' | 'viewer';
   categories?: BotCategory[];
   bots: Bot[];
