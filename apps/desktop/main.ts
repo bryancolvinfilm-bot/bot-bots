@@ -120,6 +120,18 @@ function window(url: string) {
     if (!trusted(event) || typeof id !== 'string' || typeof locale !== 'string')
       throw Error('Untrusted dictation request.');
     await speech.start(id, locale);
+    if (process.platform === 'darwin') {
+      const allowed = await systemPreferences.askForMediaAccess('microphone');
+      if (!speech.owns(id)) throw Error('Dictation stopped.');
+      if (!allowed) {
+        const message =
+          'Allow microphone access for Bot-Bots in macOS Privacy & Security settings.';
+        if (!win.isDestroyed())
+          win.webContents.send('speech:event', { id, type: 'error', message });
+        await speech.stop(id, true);
+        throw Error(message);
+      }
+    }
     microphoneApproved = true;
   });
   ipcMain.handle('speech:stop', (event, id, cancel) => {

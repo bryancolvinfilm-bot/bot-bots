@@ -49,6 +49,9 @@ export class NativeSpeech {
   get active() {
     return !!this.current;
   }
+  owns(id: string) {
+    return this.current?.id === id;
+  }
   capabilities(locale: string): Promise<SpeechCapabilities> {
     if (!this.helper || !existsSync(this.helper))
       return Promise.resolve({
