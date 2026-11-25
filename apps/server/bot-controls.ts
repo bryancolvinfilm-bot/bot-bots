@@ -6,7 +6,8 @@ import { phrasesSchema } from './team-schemas';
 import { nextRun } from './scheduler';
 import { applyCompaction, compactionPlan, tasksFor, undoCompaction } from './team';
 import { saveSkill } from './skills';
-import { selectBotModel, modelSelectionSchema } from './bot-models';
+import { selectConversationModel, modelSelectionSchema } from './bot-models';
+import { runningChatModels } from '../../packages/shared/chat-models';
 import { effortOptions } from '../../packages/shared/model-effort';
 import { canBeMainBot } from '../../packages/shared/main-bot';
 
@@ -305,11 +306,24 @@ export class BotControls {
           s.setConfig('settings', { ...s.settings(), mainBotId: null });
         return { message: `Updated ${updated.name}’s profile.`, profile: updated };
       }
-      case 'model_select':
+      case 'model_select': {
+        const request = run.steering?.at(-1)?.content ?? run.prompt;
+        if (!/\b(model|claude|chatgpt|gpt|qwen|opus|sonnet|haiku|effort|switch)\b/i.test(request))
+          throw Error(
+            'Change a conversation’s model only when the human requests a model or effort change.',
+          );
+        const { providerId, ...selection } = modelSelectionSchema.parse(changes);
+        if (providerId && selection.modelId === undefined)
+          selection.modelId = runningChatModels(s.all('models'), s.all('providers')).find(
+            (m) => m.providerId === providerId,
+          )?.id;
+        if (providerId && !selection.modelId)
+          throw Error('No running model is available for that service.');
         return {
-          message: 'Updated this bot’s model and effort preferences.',
-          profile: selectBotModel(s, bot.id, changes),
+          message: 'Updated the model and effort for this conversation.',
+          conversation: selectConversationModel(s, run.conversationId, selection, true),
         };
+      }
       case 'memory_save': {
         const value = z
           .object({

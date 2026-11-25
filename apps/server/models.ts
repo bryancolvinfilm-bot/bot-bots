@@ -1,6 +1,7 @@
 import type { Model, Provider, TaskType, Urgency } from '../../packages/shared/types';
 import { Store } from './store';
 import { TaskLimitError, ModelToolFormatError, ModelEmptyAnswerError } from './generation-errors';
+import { providerContextError, ContextBudgetError } from './generation-errors';
 import { readChatStream, type CompletionProgress } from './chat-stream';
 import { discoverModels } from './model-discovery';
 import { rankModels, effectiveContext } from '../../packages/shared/model-routing';
@@ -200,6 +201,8 @@ export interface WireMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   rawOutput?: unknown[];
+  rawOutputProviderId?: string;
+  rawOutputModelId?: string;
 }
 export interface ToolCall {
   id: string;
@@ -231,8 +234,9 @@ export function fitContext(
     );
     const currentPrompt = input.findIndex((m, index) => index > previousReply && m.role === 'user');
     if (currentPrompt <= 1)
-      throw new TaskLimitError(
+      throw new ContextBudgetError(
         `Bot-Bots' configured context window is too small for this request: approximately ${estimate().toLocaleString()} input tokens, ${maxTokens.toLocaleString()} output tokens reserved, and a ${contextTokens.toLocaleString()}-token effective window. Check the model's context source/cap in Model workshop. This check stopped the request before provider inference.`,
+        contextTokens,
       );
     input.splice(1, 1);
   }
@@ -246,6 +250,19 @@ export function normalizeSystemMessages(messages: WireMessage[]): WireMessage[] 
     ...messages.filter((message) => message.role !== 'system'),
   ];
 }
+export function portableMessages(
+  messages: WireMessage[],
+  provider: Provider,
+  model: Model,
+): WireMessage[] {
+  return messages.map(({ rawOutput, rawOutputProviderId, rawOutputModelId, ...message }) => {
+    const compatible =
+      ['openai-responses', 'chatgpt'].includes(provider.kind) &&
+      (!rawOutputProviderId || rawOutputProviderId === provider.id) &&
+      (!rawOutputModelId || rawOutputModelId === model.id);
+    return rawOutput && compatible ? { ...message, rawOutput } : message;
+  });
+}
 export async function complete(
   p: Provider,
   m: Model,
@@ -256,7 +273,9 @@ export async function complete(
   credentials?: Credentials,
   progress?: (snapshot: CompletionProgress) => void,
 ): Promise<Completion> {
-  messages = fitContext(normalizeSystemMessages(messages), tools, effectiveContext(m), maxTokens);
+  messages = portableMessages(normalizeSystemMessages(messages), p, m);
+  if (p.local || m.contextSource === 'manual')
+    messages = fitContext(messages, tools, effectiveContext(m), maxTokens);
   if (p.kind === 'claude-code') {
     const claude = credentials && claudeConnections.get(credentials);
     if (!claude) throw Error('Connect Claude in Model workshop first.');
@@ -314,9 +333,12 @@ export async function complete(
     }),
   });
   if (!res.ok) {
+    const detail = await res.text();
+    const contextError = providerContextError(detail);
+    if (contextError && [400, 413, 422, 500].includes(res.status)) throw contextError;
     const text = p.credentialId
       ? 'Credential-backed provider error details withheld.'
-      : (await res.text()).slice(0, 350);
+      : detail.slice(0, 350);
     if (
       p.local &&
       tools.length &&
@@ -438,10 +460,14 @@ export async function completeAnthropic(
         : {}),
     }),
   });
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = await response.text();
+    const contextError = providerContextError(detail);
+    if (contextError && [400, 413, 422, 500].includes(response.status)) throw contextError;
     throw new Error(
-      `Anthropic HTTP ${response.status}: ${p.credentialId ? 'Credential-backed error details withheld.' : (await response.text()).slice(0, 300)}`,
+      `Anthropic HTTP ${response.status}: ${p.credentialId ? 'Credential-backed error details withheld.' : detail.slice(0, 300)}`,
     );
+  }
   const data = JSON.parse(
     redactSecrets(JSON.stringify(await response.json()), [
       (headers as Record<string, string>)['x-api-key'] ?? '',
@@ -490,7 +516,12 @@ export async function completeResponses(
         call_id: message.tool_call_id,
         output: message.content ?? '',
       });
-    else if (message.rawOutput) input.push(...message.rawOutput);
+    else if (
+      message.rawOutput &&
+      (!message.rawOutputProviderId || message.rawOutputProviderId === p.id) &&
+      (!message.rawOutputModelId || message.rawOutputModelId === m.id)
+    )
+      input.push(...message.rawOutput);
     else {
       if (message.content) input.push({ role: message.role, content: message.content });
       for (const t of message.tool_calls ?? [])
@@ -533,10 +564,14 @@ export async function completeResponses(
         : {}),
     }),
   });
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = await response.text();
+    const contextError = providerContextError(detail);
+    if (contextError && [400, 413, 422, 500].includes(response.status)) throw contextError;
     throw new Error(
-      `OpenAI HTTP ${response.status}: ${p.credentialId || oauthToken ? 'Check the model connection and account usage limits.' : (await response.text()).slice(0, 300)}`,
+      `OpenAI HTTP ${response.status}: ${p.credentialId || oauthToken ? 'Check the model connection and account usage limits.' : detail.slice(0, 300)}`,
     );
+  }
   const data = JSON.parse(
     redactSecrets(
       JSON.stringify(
@@ -587,6 +622,8 @@ export async function completeResponses(
       content: text || null,
       tool_calls: calls,
       rawOutput: data.output,
+      rawOutputProviderId: p.id,
+      rawOutputModelId: m.id,
     } as WireMessage,
     tokens: data.usage?.total_tokens,
     truncated,

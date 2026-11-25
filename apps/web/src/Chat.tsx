@@ -28,6 +28,7 @@ import type {
   Run,
   RunEvent,
   JobOptions,
+  Conversation,
 } from '../../../packages/shared/types';
 import { Avatar } from './Avatar';
 import { api, watchRun } from './api';
@@ -42,14 +43,10 @@ import type { DraftSummary } from '../../../packages/shared/drafts';
 import { DraftCard } from './DraftCard';
 import { BotPanel } from './BotPanel';
 import { ChatModelControls } from './BotModels';
+import { contextDescription } from '../../../packages/shared/chat-models';
 import { TaskJourney } from './TaskJourney';
 import { LiveBuilds } from './LiveBuilds';
-import {
-  rankModels,
-  effectiveContext,
-  classifyTask,
-  canUseTools,
-} from '../../../packages/shared/model-routing';
+import { rankModels, classifyTask, canUseTools } from '../../../packages/shared/model-routing';
 import { humanHandoffs } from '../../../packages/shared/delivery';
 import {
   credentialService,
@@ -103,6 +100,7 @@ export function Chat({
   const [followingLatest, setFollowingLatest] = useState(true);
   const [historyRuns, setHistoryRuns] = useState<Run[]>([]);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [channel, setChannel] = useState<Conversation>();
   const context = `${bot.id}:${conversationId ?? ''}`;
   const currentContext = useRef(context);
   const loadSequence = useRef(0);
@@ -135,7 +133,7 @@ export function Chat({
     const key = `${bot.id}:${conversationId ?? ''}`;
     if (currentContext.current !== key) return;
     const sequence = ++loadSequence.current;
-    const [chatMessages, runs, savedDrafts] = await Promise.all([
+    const [chatMessages, runs, savedDrafts, preferences] = await Promise.all([
       conversationId
         ? api<Message[]>(`/conversations/${conversationId}/messages`)
         : Promise.resolve([]),
@@ -143,8 +141,12 @@ export function Chat({
       conversationId
         ? api<DraftSummary[]>(`/conversations/${conversationId}/drafts`)
         : Promise.resolve([]),
+      conversationId
+        ? api<Conversation>(`/conversations/${conversationId}`)
+        : Promise.resolve(undefined),
     ]);
     if (currentContext.current !== key || sequence !== loadSequence.current) return;
+    setChannel(preferences);
     setMessages((old) =>
       [
         ...new Map(
@@ -169,6 +171,7 @@ export function Chat({
     setMessages([]);
     setHistoryRuns([]);
     setDrafts([]);
+    setChannel(undefined);
     setHistoryOpen(false);
     void load().catch((e) => notify(e.message));
     return () => stream.current?.abort();
@@ -438,8 +441,8 @@ export function Chat({
     data.settings,
     data.assessments,
     jobOptions.task ?? classifyTask(previewPrompt),
-    bot.modelId,
-    { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency, providerId: bot.providerId },
+    channel?.modelId !== undefined ? channel.modelId : bot.modelId,
+    { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency },
   ).find((m) => m.status !== 'offline');
   const usedModel =
     run?.status === 'running' ? data.models.find((m) => m.id === run.modelId) : undefined;
@@ -877,7 +880,25 @@ export function Chat({
             }}
           >
             <div className="composer">
-              <ChatModelControls bot={bot} data={data} model={nextModel} refresh={refresh} />
+              <ChatModelControls
+                key={conversationId ?? bot.id}
+                bot={bot}
+                data={data}
+                model={nextModel}
+                conversation={channel}
+                changed={(value) => {
+                  if (currentContext.current === `${value.botId}:${value.id}`) {
+                    loadSequence.current++;
+                    setChannel(value);
+                  }
+                }}
+                refresh={refresh}
+                context={
+                  run?.modelId === nextModel?.id
+                    ? run?.work?.find((w) => w.botId === bot.id)?.context
+                    : undefined
+                }
+              />
               {!!plannedHandoffs.length && (
                 <small className="delivery-plan">
                   Sends a handoff to{' '}
@@ -906,7 +927,10 @@ export function Chat({
                   className="composer-model"
                   title={
                     shownModel
-                      ? `${usedModel ? 'Current reply' : 'Next reply'} · ${effectiveContext(shownModel).toLocaleString()} context tokens${shownModel.loadState === 'loaded' ? ' · loaded on server' : ''}`
+                      ? `${usedModel ? 'Current reply' : 'Next reply'} · ${contextDescription(
+                          shownModel,
+                          data.providers.find((p) => p.id === shownModel.providerId),
+                        )}`
                       : 'Load or enable a chat model in Model workshop.'
                   }
                 >

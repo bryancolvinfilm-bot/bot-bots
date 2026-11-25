@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Completion, WireMessage } from './models';
+import { providerContextError } from './generation-errors';
 
 const downloads = 'https://downloads.claude.ai/claude-code-releases';
 export interface ClaudeCodeState {
@@ -269,10 +270,13 @@ export class ClaudeCode {
       } catch {
         throw Error('Claude Code returned an incomplete response.');
       }
-      if (result.code || data.is_error)
+      if (result.code || data.is_error) {
+        const contextError = providerContextError(JSON.stringify([data.result, data.error, data.errors]));
+        if (contextError) throw contextError;
         throw Error(
           'Claude Code could not complete this request. Check the account connection and plan usage limits.',
         );
+      }
       const answer =
         data.structured_output ??
         (() => {

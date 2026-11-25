@@ -191,6 +191,12 @@ export class AccessControl {
     if (req.method === 'POST' && path === '/api/previews') return true;
     if (/^\/api\/(access|export|import)/.test(path)) return false;
     if (req.method === 'GET') return true;
+    if (
+      role === 'operator' &&
+      req.method === 'PUT' &&
+      /^\/api\/conversations\/[^/]+\/model$/.test(path)
+    )
+      return true;
     return (
       role === 'operator' &&
       req.method === 'POST' &&

@@ -59,7 +59,22 @@ store.put('providers', {
   autoDiscover: false,
   baseUrl: `http://127.0.0.1:${(model.address() as AddressInfo).port}/v1`,
 });
-store.put('models', { ...chosen, enabled: true, contextTokens: 131072, toolCalling: 'disabled' });
+store.put('models', {
+  ...chosen,
+  enabled: true,
+  status: 'online',
+  loadState: 'loaded',
+  loadedContextTokens: 122112,
+  contextTokens: 122112,
+  toolCalling: 'disabled',
+});
+store.put('models', {
+  ...chosen,
+  id: 'unloaded-test',
+  name: 'Unloaded test model',
+  status: 'online',
+  loadState: 'unloaded',
+});
 for (const name of ['ChatGPT', 'Claude']) {
   const id = `test-${name.toLowerCase()}`;
   store.put('providers', {
@@ -67,7 +82,7 @@ for (const name of ['ChatGPT', 'Claude']) {
     id,
     name,
     local: false,
-    enabled: false,
+    enabled: true,
     autoDiscover: false,
     baseUrl: `http://127.0.0.1:${(model.address() as AddressInfo).port}/v1`,
   });
@@ -81,6 +96,7 @@ for (const name of ['ChatGPT', 'Claude']) {
           : `claude-sonnet-4-6${suffix === 'b' ? '-test' : ''}`,
       providerId: id,
       enabled: false,
+      status: 'online',
     });
 }
 store.setConfig('settings', { ...store.settings(), mainBotId: null });
@@ -178,12 +194,29 @@ try {
   assert.equal(await editor.isVisible(), true);
   await editor.getByLabel('Online service', { exact: true }).selectOption('test-chatgpt');
   await page.screenshot({ path: join(dir, 'local-online-service-picker.png') });
-  await editor.getByRole('button', { name: 'Save your bot', exact: true }).click();
+  await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
   await editor.waitFor({ state: 'hidden' });
+  const originalBot = store.get('bots', 'calendar')!;
+  const currentChannel = () => store.all('conversations').find((c) => c.botId === 'calendar')!;
+  assert.deepEqual(
+    await page
+      .getByLabel('Chat model', { exact: true })
+      .locator('optgroup')
+      .evaluateAll((elements) => elements.map((e) => e.getAttribute('label'))),
+    ['Online · frontier models', 'Local · running models'],
+  );
+  assert.equal(
+    await page
+      .getByLabel('Chat model', { exact: true })
+      .locator('option[value="unloaded-test"]')
+      .count(),
+    0,
+  );
   await page.getByLabel('Chat model', { exact: true }).selectOption('test-chatgpt-b');
-  await until(() => store.get('bots', 'calendar')?.modelId === 'test-chatgpt-b');
+  await until(() => currentChannel().modelId === 'test-chatgpt-b');
   await page.getByLabel('Reasoning effort', { exact: true }).selectOption('high');
-  await until(() => store.get('bots', 'calendar')?.reasoningEffort === 'high');
+  await until(() => currentChannel().reasoningEffort === 'high');
+  assert.deepEqual(store.get('bots', 'calendar'), originalBot);
   await send('Hello.');
   await page.locator('.message.assistant').filter({ hasText: 'Online model reply.' }).waitFor();
   assert.equal(calls.at(-1).reasoning_effort, 'high');
@@ -193,6 +226,20 @@ try {
   assert.equal(await page.getByLabel('Chat model', { exact: true }).inputValue(), 'test-chatgpt-b');
   assert.equal(await page.getByLabel('Reasoning effort', { exact: true }).inputValue(), 'high');
   await page.screenshot({ path: join(dir, 'chat-model-and-effort.png') });
+  await page.getByLabel('Chat model', { exact: true }).selectOption(chosen.id);
+  await until(() => currentChannel().modelId === chosen.id);
+  assert.ok((await page.locator('.chat-context-status').innerText()).includes('122,112'));
+  for (const remote of store.all('models').filter((m) => m.providerId.startsWith('test-')))
+    store.put('models', { ...remote, status: 'offline' });
+  await page.reload();
+  await page.getByRole('button', { name: 'Open Calendar', exact: true }).click();
+  await page.getByLabel('Chat model', { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel('Chat model', { exact: true }).locator('optgroup option').count(),
+    1,
+  );
+  assert.equal(await page.getByLabel('Reasoning effort', { exact: true }).isVisible(), true);
+  await page.screenshot({ path: join(dir, 'single-running-model-dropdown.png') });
   assert.deepEqual(errors, []);
   writeFileSync(
     join(dir, 'verified.json'),
@@ -207,6 +254,10 @@ try {
         selectedServiceEnablesModel: true,
         chatModelAndEffortPersist: true,
         effortReachedInference: true,
+        allRunningModelsGroupedInChat: true,
+        unloadedModelsHidden: true,
+        oneModelStillHasDropdown: true,
+        botDefaultsUnchanged: true,
         errors,
       },
       null,

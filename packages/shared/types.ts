@@ -66,6 +66,14 @@ export interface ModelAttempt {
   calls: number;
 }
 export interface WorkRecord {
+  context?: {
+    inputTokens: number;
+    windowTokens?: number;
+    reservedOutputTokens: number;
+    compactions: number;
+    status: 'ready' | 'compacting';
+    source: 'loaded' | 'manual' | 'provider';
+  };
   prototypeId?: string;
   id: string;
   botId: string;
@@ -139,6 +147,9 @@ export interface Message {
   steeringId?: string;
 }
 export interface Conversation {
+  modelId?: string | null;
+  reasoningEffort?: import('./model-effort').ReasoningEffort | null;
+  contextCheckpointId?: string;
   spaceId?: string;
   id: string;
   botId: string;

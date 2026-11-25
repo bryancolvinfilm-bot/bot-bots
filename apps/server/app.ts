@@ -16,7 +16,7 @@ import { ChatGPTAuth } from './chatgpt-auth';
 import { TeamConversations } from './team-conversations';
 import { ClaudeCode } from './claude-code';
 import { botInput, routineInput, saveRoutine } from './bot-controls';
-import { selectBotModel } from './bot-models';
+import { selectBotModel, selectConversationModel } from './bot-models';
 import { EFFORTS } from '../../packages/shared/model-effort';
 import { migrateClaudeContexts, withClaudeContext } from './frontier-context';
 import type { Credentials } from './credentials';
@@ -68,6 +68,16 @@ const feedbackSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 const workSchema = z.object({
+  context: z
+    .object({
+      inputTokens: z.number().nonnegative(),
+      windowTokens: z.number().positive().optional(),
+      reservedOutputTokens: z.number().nonnegative(),
+      compactions: z.number().int().nonnegative(),
+      status: z.enum(['ready', 'compacting']),
+      source: z.enum(['loaded', 'manual', 'provider']),
+    })
+    .optional(),
   prototypeId: id.optional(),
   progress: progressSchema.optional(),
   queued: z.boolean().optional(),
@@ -1170,6 +1180,35 @@ export function createApp(
     ),
   );
   app.get('/api/team-conversations', (_req, res) => res.json(teamConversations.list()));
+  app.put(
+    '/api/conversations/:id/model',
+    wrap((req, res) => {
+      const conversation = selectConversationModel(
+        store,
+        String(req.params.id),
+        req.body,
+        res.locals.accessRole === 'owner',
+      );
+      runtime.modelSelectionChanged(conversation.id);
+      res.json(conversation);
+    }),
+  );
+  app.post(
+    '/api/models/refresh',
+    wrap(async (_req, res) => {
+      await Promise.allSettled(
+        store
+          .all('providers')
+          .filter((p) => p.enabled)
+          .map((p) => discover(store, p.id)),
+      );
+      runtime.events.emit('models', {
+        models: store.all('models'),
+        providers: store.all('providers'),
+      });
+      res.json({ ok: true });
+    }),
+  );
   app.get('/api/conversations/:id', (req, res) => {
     const aliases = store.config<Record<string, string>>('legacy-conversation-aliases');
     const channel = store.get(
@@ -2222,6 +2261,23 @@ export function createApp(
             }),
           ),
           categories: z.array(categorySchema).default([]),
+          contextCheckpoints: z
+            .array(
+              z.object({
+                id,
+                botId: id,
+                conversationId: id,
+                runId: id,
+                workId: id,
+                createdAt: timestamp,
+                summary: z.string().max(100000),
+                ledger: z.string().max(100000),
+                archive: z.string().max(40000000),
+                characters: z.number().nonnegative(),
+                throughMessageId: id.optional(),
+              }),
+            )
+            .default([]),
           tasks: z.array(taskRecordSchema).default([]),
           compactions: z.array(compactionSchema).default([]),
           pluginActions: z.array(pluginActionSchema).default([]),
@@ -2270,6 +2326,9 @@ export function createApp(
           ),
           conversations: z.array(
             z.object({
+              modelId: z.string().nullable().optional(),
+              reasoningEffort: z.enum(EFFORTS).nullable().optional(),
+              contextCheckpointId: id.optional(),
               id,
               spaceId: id.optional(),
               botId: id,
@@ -2534,6 +2593,7 @@ export function createApp(
           'models',
           'conversations',
           'teamConversations',
+          'contextCheckpoints',
           'messages',
           'memory',
           'skills',

@@ -24,6 +24,7 @@ import type {
 } from '../../packages/shared/types';
 
 interface Tables {
+  contextCheckpoints: import('../../packages/shared/context').ContextCheckpoint;
   teamConversations: import('../../packages/shared/types').TeamConversation;
   apiDefinitions: import('../../packages/shared/service-api').ServiceApi & {
     botId: string;
@@ -191,6 +192,7 @@ export class Store {
           'bots',
           'providers',
           'models',
+          'contextCheckpoints',
           'conversations',
           'teamConversations',
           'messages',

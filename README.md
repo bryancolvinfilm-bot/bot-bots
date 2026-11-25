@@ -36,7 +36,9 @@ LM Studio is supported at `http://127.0.0.1:1234/v1`, along with other compatibl
 - **Continue with Claude** through Anthropic's official, unmodified Claude Code tool and its own browser sign-in. The host downloads and checksum-verifies that tool when needed; Claude Code retains its login credentials.
 - API-key connections for OpenAI, Anthropic, and compatible providers.
 
-Cloud models require explicit model enablement and **Local-only mode** to be off. Each bot retains its role and normal tool permissions. See [model connections](docs/FRONTIER-MODELS.md).
+Every chat has a model/effort picker: connected online models appear first, followed by loaded local models. Choices are saved per conversation; bot profile defaults remain suggestions. Selecting an online model directly in chat opts it in without a separate settings step. Each bot retains its role and normal tool permissions. See [model connections](docs/FRONTIER-MODELS.md).
+
+Online providers manage their context capacity by default, with an optional manual app cap. Local models follow the actual loaded context reported by their server. Automatic working-context compaction preserves the current request and completed results while retaining the full visible history and local checkpoints.
 
 ## Team spaces and collaboration
 

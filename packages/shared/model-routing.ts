@@ -41,7 +41,6 @@ export function rankModels(
   const eligible = models.filter(
     (m) =>
       m.enabled &&
-      (!context.providerId || m.providerId === context.providerId) &&
       (!m.modelType || m.modelType === 'llm') &&
       providers.some(
         (p) =>
@@ -62,7 +61,9 @@ export function rankModels(
     const x = experience(a),
       y = experience(b);
     const available = Number(a.status === 'offline') - Number(b.status === 'offline');
-    const pinned = Number(b.id === preferred) - Number(a.id === preferred);
+    const pinned = preferred
+      ? Number(b.id === preferred) - Number(a.id === preferred)
+      : Number(b.providerId === context.providerId) - Number(a.providerId === context.providerId);
     const chosen =
       settings.modelSelection === 'manual'
         ? Number(b.id === settings.defaultModelId) - Number(a.id === settings.defaultModelId)

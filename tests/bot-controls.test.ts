@@ -370,7 +370,7 @@ test('online service choice enables its catalog and keeps routing and effort sco
     assert.equal(store.settings().localOnly, false);
     assert.deepEqual(
       candidates(store, 'general', null, { botId: 'calendar' }).map((m) => m.id),
-      ['online-gpt'],
+      ['online-gpt', m.id],
     );
     selectBotModel(store, 'calendar', { modelId: 'online-gpt', reasoningEffort: 'high' });
     assert.deepEqual(store.get('bots', 'research'), otherBot);
@@ -413,7 +413,7 @@ test('online service choice enables its catalog and keeps routing and effort sco
     );
     assert.equal(payload.reasoning.effort, 'high');
     store.setConfig('settings', { ...store.settings(), localOnly: true });
-    assert.equal(candidates(store, 'general', null, { botId: 'calendar' }).length, 0);
+    assert.ok(candidates(store, 'general', null, { botId: 'calendar' }).every(m => m.providerId !== 'online-test'));
   } finally {
     global.fetch = oldFetch;
     store.close();

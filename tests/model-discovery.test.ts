@@ -54,6 +54,47 @@ const answer = (content: string) => ({
   choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
   usage: { total_tokens: 12 },
 });
+
+test('legacy local context defaults follow the actual loaded window while explicit manual caps remain intact', async () => {
+  const f = await fixture((req, res) => {
+    if (req.url === '/api/v1/models')
+      res.end(JSON.stringify({ models: [native('larger-local', true, 196608)] }));
+    else if (req.url === '/v1/models') res.end(JSON.stringify({ data: [{ id: 'larger-local' }] }));
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  try {
+    const template = f.store.all('models')[0];
+    const id = `${f.providerId}::larger-local`;
+    for (const oldCap of [32768, 65536]) {
+      f.store.put('models', {
+        ...template,
+        id,
+        providerId: f.providerId,
+        name: 'larger-local',
+        contextTokens: oldCap,
+        contextSource: undefined,
+        enabled: true,
+      });
+      await discover(f.store, f.providerId);
+      const current = f.store.get('models', id)!;
+      assert.equal(current.contextSource, 'server');
+      assert.equal(current.loadedContextTokens, 196608);
+      assert.equal(effectiveContext(current), 196608);
+    }
+    f.store.put('models', {
+      ...f.store.get('models', id)!,
+      contextSource: 'manual',
+      contextTokens: 65536,
+    });
+    await discover(f.store, f.providerId);
+    assert.equal(effectiveContext(f.store.get('models', id)!), 65536);
+  } finally {
+    await f.close();
+  }
+});
 function finished(host: ReturnType<typeof createApp>, prompt: string) {
   const run = host.runtime.create('worker1', prompt);
   return new Promise<Run>((resolve, reject) => {

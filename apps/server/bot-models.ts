@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { EFFORTS, effortOptions } from '../../packages/shared/model-effort';
 import { Store } from './store';
 import { canBeMainBot } from '../../packages/shared/main-bot';
+import { runningChatModels } from '../../packages/shared/chat-models';
 
 export const modelSelectionSchema = z
   .object({
@@ -10,6 +11,46 @@ export const modelSelectionSchema = z
     reasoningEffort: z.enum(EFFORTS).nullable().optional(),
   })
   .strict();
+
+export function selectConversationModel(
+  store: Store,
+  conversationId: string,
+  input: unknown,
+  owner: boolean,
+) {
+  const conversation = store.get('conversations', conversationId);
+  if (!conversation) throw Error('Conversation not found.');
+  const patch = modelSelectionSchema.omit({ providerId: true }).parse(input);
+  const modelId = patch.modelId === undefined ? conversation.modelId : patch.modelId;
+  const model = modelId ? store.get('models', modelId) : undefined;
+  if (modelId && !model) throw Error('Model not found.');
+  const provider = model && store.get('providers', model.providerId);
+  if (model && !runningChatModels([model], store.all('providers')).length)
+    throw Error('That model is not currently running or connected. Refresh the model list.');
+  if (!owner && model && (!model.enabled || (store.settings().localOnly && !provider?.local)))
+    throw Error('The owner must enable this model connection first.');
+  const effort =
+    patch.reasoningEffort === undefined
+      ? modelId === conversation.modelId
+        ? conversation.reasoningEffort
+        : null
+      : patch.reasoningEffort;
+  if (effort && (!model || !effortOptions(model, provider).includes(effort)))
+    throw Error('Choose an effort level supported by this model.');
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    if (owner && model && provider) {
+      store.put('models', { ...model, enabled: true, enablement: 'manual' });
+      if (!provider.local) store.setConfig('settings', { ...store.settings(), localOnly: false });
+    }
+    const saved = store.put('conversations', { ...conversation, modelId, reasoningEffort: effort });
+    store.db.exec('COMMIT');
+    return saved;
+  } catch (error) {
+    store.db.exec('ROLLBACK');
+    throw error;
+  }
+}
 
 export function selectBotModel(
   store: Store,

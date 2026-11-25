@@ -1,10 +1,162 @@
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Bootstrap, Bot, Model } from '../../../packages/shared/types';
+import type {
+  Bootstrap,
+  Bot,
+  Model,
+  Conversation,
+  WorkRecord,
+} from '../../../packages/shared/types';
+import { runningChatModels, contextDescription } from '../../../packages/shared/chat-models';
 import { effortOptions } from '../../../packages/shared/model-effort';
 import { api } from './api';
 import { Field, Modal } from './ui';
 import { FrontierConnections } from './FrontierConnections';
+
+export function ChatModelControls({
+  bot,
+  data,
+  model,
+  conversation,
+  changed,
+  refresh,
+  context,
+}: {
+  bot: Bot;
+  data: Bootstrap;
+  model?: Model;
+  conversation?: Conversation;
+  changed: (value: Conversation) => void;
+  refresh: () => Promise<void>;
+  context?: WorkRecord['context'];
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const choices = runningChatModels(data.models, data.providers).filter(
+    (m) =>
+      !data.accessRole ||
+      data.accessRole === 'owner' ||
+      (m.enabled &&
+        (!data.settings.localOnly || data.providers.find((p) => p.id === m.providerId)?.local)),
+  );
+  const online = choices.filter((m) => !data.providers.find((p) => p.id === m.providerId)?.local);
+  const local = choices.filter((m) => data.providers.find((p) => p.id === m.providerId)?.local);
+  const preference = conversation?.modelId !== undefined ? conversation.modelId : bot.modelId;
+  const selected = choices.find((m) => m.id === preference) ?? model ?? choices[0];
+  const provider = data.providers.find((p) => p.id === selected?.providerId);
+  const efforts = effortOptions(selected, provider);
+  const inheritedEffort =
+    conversation?.modelId !== undefined ? conversation.reasoningEffort : bot.reasoningEffort;
+  const effort = preference && selected?.id !== preference ? null : inheritedEffort;
+  const disabled =
+    busy || data.accessRole === 'viewer' || !conversation || bot.cloneStatus === 'retired';
+  async function update(patch: object) {
+    if (!conversation) return;
+    setBusy(true);
+    setError('');
+    try {
+      changed(await api<Conversation>(`/conversations/${conversation.id}/model`, 'PUT', patch));
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change the model.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const option = (m: Model) => {
+    const p = data.providers.find((p) => p.id === m.providerId)!;
+    return (
+      <option key={m.id} value={m.id}>
+        {p.kind === 'claude-code' ? 'Claude' : p.kind === 'chatgpt' ? 'ChatGPT' : p.name} · {m.name}
+      </option>
+    );
+  };
+  return (
+    <div className="chat-model-controls">
+      <label>
+        <span>Model</span>
+        <select
+          aria-label="Chat model"
+          disabled={disabled || !choices.length}
+          value={preference && choices.some((m) => m.id === preference) ? preference : ''}
+          onChange={(e) => void update({ modelId: e.target.value || null, reasoningEffort: null })}
+        >
+          <option value="">
+            {choices.length ? `Suggested · ${model?.name ?? choices[0].name}` : 'No running models'}
+          </option>
+          {!!online.length && (
+            <optgroup label="Online · frontier models">{online.map(option)}</optgroup>
+          )}
+          {!!online.length && !!local.length && (
+            <option disabled value="__separator__">
+              ────────────────
+            </option>
+          )}
+          {!!local.length && (
+            <optgroup label="Local · running models">{local.map(option)}</optgroup>
+          )}
+        </select>
+      </label>
+      <label>
+        <span>Effort</span>
+        <select
+          aria-label="Reasoning effort"
+          disabled={disabled || !efforts.length}
+          value={effort && efforts.includes(effort) ? effort : ''}
+          onChange={(e) =>
+            void update({ modelId: selected?.id, reasoningEffort: e.target.value || null })
+          }
+        >
+          <option value="">{efforts.length ? 'Default' : 'Model managed'}</option>
+          {efforts.map((e) => (
+            <option key={e} value={e}>
+              {e[0].toUpperCase() + e.slice(1)}
+            </option>
+          ))}
+        </select>
+      </label>
+      {(!data.accessRole || data.accessRole === 'owner') && (
+        <button
+          type="button"
+          className="icon-button"
+          disabled={busy}
+          aria-label="Refresh running models"
+          title="Refresh running models"
+          onClick={() => {
+            setBusy(true);
+            setError('');
+            void api('/models/refresh', 'POST', {})
+              .then(refresh)
+              .catch((e) => setError(e.message))
+              .finally(() => setBusy(false));
+          }}
+        >
+          ↻
+        </button>
+      )}
+      {selected && (
+        <small
+          className="chat-context-status"
+          title={
+            context
+              ? 'Estimated working context. Your visible chat history stays saved when older working context is compacted.'
+              : contextDescription(selected, provider)
+          }
+        >
+          {context
+            ? `${context.status === 'compacting' ? 'Making room · ' : ''}Context ~${context.inputTokens.toLocaleString()}${context.windowTokens ? ` / ${context.windowTokens.toLocaleString()}` : ' · provider managed'}${context.compactions ? ` · compacted ${context.compactions}×` : ''}`
+            : contextDescription(selected, provider)}
+        </small>
+      )}
+      {busy && <small>Saving…</small>}
+      {error && (
+        <small className="error-text" role="alert">
+          {error}
+        </small>
+      )}
+    </div>
+  );
+}
 
 export function BotModelPicker({
   bot,
@@ -136,97 +288,6 @@ export function BotModelPicker({
           </Modal>,
           document.body,
         )}
-    </div>
-  );
-}
-
-export function ChatModelControls({
-  bot,
-  data,
-  model,
-  refresh,
-}: {
-  bot: Bot;
-  data: Bootstrap;
-  model?: Model;
-  refresh: () => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
-  const providerId =
-    bot.providerId ??
-    data.models.find((m) => m.id === bot.modelId)?.providerId ??
-    model?.providerId;
-  const provider = data.providers.find((p) => p.id === providerId);
-  const choices = data.models.filter(
-    (m) => m.providerId === providerId && (!m.modelType || m.modelType === 'llm'),
-  );
-  const efforts = effortOptions(data.models.find((m) => m.id === bot.modelId) ?? model, provider);
-  async function update(patch: object) {
-    setBusy(true);
-    setError('');
-    try {
-      await api(`/bots/${bot.id}/model`, 'PUT', patch);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not change the model.');
-    } finally {
-      setBusy(false);
-    }
-  }
-  if ((data.accessRole && data.accessRole !== 'owner') || bot.prototypeId) return null;
-  return (
-    <div className="chat-model-controls">
-      {provider && (
-        <label>
-          <span>{provider.name}</span>
-          <select
-            aria-label="Chat model"
-            disabled={busy}
-            value={bot.modelId ?? ''}
-            onChange={(e) =>
-              void update({ providerId, modelId: e.target.value || null, reasoningEffort: null })
-            }
-          >
-            <option value="">Auto model</option>
-            {choices.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {!!efforts.length && (
-        <label>
-          <span>Effort</span>
-          <select
-            aria-label="Reasoning effort"
-            disabled={busy}
-            value={bot.reasoningEffort ?? ''}
-            onChange={(e) =>
-              void update({
-                providerId,
-                modelId: bot.modelId ?? model?.id,
-                reasoningEffort: e.target.value || null,
-              })
-            }
-          >
-            <option value="">Default</option>
-            {efforts.map((e) => (
-              <option key={e} value={e}>
-                {e[0].toUpperCase() + e.slice(1)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {busy && <small>Saving…</small>}
-      {error && (
-        <small className="error-text" role="alert">
-          {error}
-        </small>
-      )}
     </div>
   );
 }

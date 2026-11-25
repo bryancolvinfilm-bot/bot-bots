@@ -6,6 +6,7 @@ import { ExperienceTable } from './ExperienceTable';
 import { openCredentials } from './CredentialManager';
 import { FrontierConnections } from './FrontierConnections';
 import { effectiveContext, canUseTools } from '../../../packages/shared/model-routing';
+import { contextDescription } from '../../../packages/shared/chat-models';
 
 import { Field, Heading, Modal } from './ui';
 export function Models({
@@ -171,7 +172,10 @@ export function Models({
                   </button>
                   <small>
                     {m.lastError ??
-                      `${effectiveContext(m).toLocaleString()} ${m.loadedContextTokens ? 'loaded context' : 'configured context'}${m.modelType && m.modelType !== 'llm' ? ` · ${m.modelType} · excluded from chat` : ''}${m.maxContextTokens ? ` · ${m.maxContextTokens.toLocaleString()} model maximum` : ''}`}
+                      `${contextDescription(
+                        m,
+                        data.providers.find((p) => p.id === m.providerId),
+                      )}${m.modelType && m.modelType !== 'llm' ? ` · ${m.modelType} · excluded from chat` : ''}`}
                   </small>
                   {!canUseTools(m) && (
                     <small>
@@ -540,6 +544,7 @@ export function ModelEditor({
 }) {
   const [m, setM] = useState({ ...model, contextSource: model.contextSource ?? 'server' });
   const serviceContext = provider?.kind === 'claude-code' ? model.maxContextTokens : undefined;
+  const providerManaged = !!provider && !provider.local;
   const [error, setError] = useState('');
   return (
     <Modal title="A good fit for the job" close={close}>
@@ -638,24 +643,28 @@ export function ModelEditor({
             }
           >
             <option value="server">
-              {serviceContext ? 'Auto · use service context' : 'Auto · use loaded server context'}
+              {providerManaged
+                ? 'Auto · provider managed (no app cap)'
+                : 'Auto · use loaded server context'}
             </option>
             <option value="manual">Manual context cap</option>
           </select>
-          <input
-            type="number"
-            min="512"
-            disabled={m.contextSource !== 'manual'}
-            value={m.contextTokens}
-            onChange={(e) => setM({ ...m, contextTokens: Number(e.target.value) })}
-          />
+          {(!providerManaged || m.contextSource === 'manual') && (
+            <input
+              type="number"
+              min="512"
+              disabled={m.contextSource !== 'manual'}
+              value={m.contextTokens}
+              onChange={(e) => setM({ ...m, contextTokens: Number(e.target.value) })}
+            />
+          )}
           <small>
-            {serviceContext
-              ? `Service context: ${serviceContext.toLocaleString()} tokens. Auto uses this window; a manual cap can lower it.`
+            {providerManaged
+              ? `No Bot-Bots input cap. The provider manages capacity; older working context is compacted automatically when needed.${serviceContext ? ` Reported window: ${serviceContext.toLocaleString()} tokens.` : ''}`
               : m.loadedContextTokens
                 ? `Server loaded: ${m.loadedContextTokens.toLocaleString()} tokens. Effective budget: ${effectiveContext(m).toLocaleString()}.`
                 : 'No loaded context is reported. A manual value is used for servers without context metadata.'}{' '}
-            {serviceContext
+            {providerManaged
               ? 'Reasoning effort does not set the context window.'
               : 'The model’s advertised maximum is separate from its current loaded context.'}
           </small>

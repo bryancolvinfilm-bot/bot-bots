@@ -63,9 +63,7 @@ export function discoverModels(
         const automatic =
           p.local && p.kind === 'openai-compatible' && current.autoEnableModels !== false;
         const enablement = existing?.enablement ?? (automatic ? 'auto' : 'manual');
-        const contextSource =
-          existing?.contextSource ??
-          (existing && existing.contextTokens !== 32768 ? 'manual' : 'server');
+        const contextSource = existing?.contextSource ?? 'server';
         store.put('models', {
           id,
           providerId: p.id,
