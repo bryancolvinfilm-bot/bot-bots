@@ -22,6 +22,8 @@ import { Semaphore } from '../apps/server/semaphore';
 import { progressPosition, visibleBots } from '../packages/shared/team';
 import { assessRuns } from '../packages/shared/experience';
 import { workLabel } from '../packages/shared/activity';
+import { TeamConversations } from '../apps/server/team-conversations';
+import { selectConversationModel, selectTeamModel } from '../apps/server/bot-models';
 import type { Run, WorkRecord } from '../packages/shared/types';
 mkdirSync('test-results/unit', { recursive: true });
 function storage() {
@@ -378,6 +380,195 @@ test('prototype workers collaborate, retain results/learning by task ID, then di
     await f.cleanup();
   }
 });
+
+for (const mode of ['conversation', 'team', 'auto'])
+  test(`prototype ${mode} model selection is shared by clones and their consolidation`, async () => {
+    const requests: any[] = [];
+    const f = await fixture((body) => {
+      requests.push(body);
+      if (body.messages[0].content.includes('You are Boss Man'))
+        return body.messages.at(-1).role === 'tool'
+          ? answer('Done')
+          : call('delegate_workers', {
+              prototypeId: 'worker3',
+              tasks: ['Write code for ALPHA', 'Research BETA'],
+            });
+      return answer('Worker results consolidated.');
+    });
+    try {
+      const local = f.store.all('models')[0],
+        provider = f.store.all('providers')[0];
+      f.store.put('models', {
+        ...local,
+        status: 'online',
+        loadState: 'loaded',
+        tasks: ['general', 'research'],
+        costPerMillion: 0,
+      });
+      f.store.put('providers', { ...provider, id: 'frontier-test', local: false, enabled: true });
+      f.store.put('models', {
+        ...local,
+        id: 'frontier-model',
+        providerId: 'frontier-test',
+        name: 'gpt-5.1',
+        status: 'online',
+        enabled: true,
+        tasks: ['coding'],
+        costPerMillion: 10,
+      });
+      f.store.put('bots', {
+        ...f.store.get('bots', 'worker3')!,
+        isPrototype: true,
+        modelId: mode === 'auto' ? null : local.id,
+      });
+      const spaces = new TeamConversations(f.store),
+        space = spaces.create('Synthetic worker model space');
+      const root = spaces.channel(space.id, 'boss-man'),
+        template = spaces.channel(space.id, 'worker3');
+      if (mode === 'conversation') {
+        selectTeamModel(f.store, { action: 'apply', modelId: local.id });
+        selectConversationModel(
+          f.store,
+          template.id,
+          { modelId: 'frontier-model', reasoningEffort: 'high' },
+          true,
+        );
+      } else if (mode === 'team')
+        selectTeamModel(f.store, {
+          action: 'apply',
+          modelId: 'frontier-model',
+          reasoningEffort: 'high',
+        });
+      else f.store.setConfig('settings', { ...f.store.settings(), localOnly: false });
+      const result = await done(
+        f.host,
+        f.host.runtime.create('boss-man', 'Use two worker clones', root.id),
+      );
+      assert.equal(result.status, 'completed', result.error);
+      const family = result.work!.filter(
+        (work) => work.botId === 'worker3' || work.prototypeId === 'worker3',
+      );
+      assert.equal(family.length, 3);
+      const expected =
+        mode === 'auto'
+          ? family.find((work) => work.botId === 'worker3')!.modelId
+          : 'frontier-model';
+      assert.ok(family.every((work) => work.modelId === expected));
+      const workerRequests = requests.filter(
+        (body) => !body.messages[0].content.includes('You are Boss Man'),
+      );
+      assert.equal(workerRequests.length, 3);
+      assert.ok(
+        workerRequests.every((body) => body.model === f.store.get('models', expected!)?.name),
+      );
+      if (mode !== 'auto')
+        assert.ok(workerRequests.every((body) => body.reasoning_effort === 'high'));
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+for (const change of ['prototype', 'team', 'reset'])
+  test(`${change} model changes reach active clones without replaying their saved tools`, async () => {
+    let held: ServerResponse | undefined,
+      writes = 0;
+    const requests: any[] = [];
+    const f = await fixture((body, res) => {
+      requests.push(body);
+      const system = body.messages[0].content;
+      if (system.includes('You are Boss Man'))
+        return body.messages.at(-1).role === 'tool'
+          ? answer('Done')
+          : call('delegate_workers', {
+              prototypeId: 'worker3',
+              tasks: ['Write the receipt once and finish.'],
+            });
+      if (system.includes('PROTOTYPE COORDINATOR:')) return answer('Consolidated.');
+      if (body.model !== 'gpt-5.1') return answer('Continued with the saved receipt.');
+      if (body.messages.at(-1).role !== 'tool') {
+        writes++;
+        return call('workspace_write', { path: 'worker-receipt.txt', content: 'ONLY_ONCE' });
+      }
+      held = res;
+      return undefined;
+    });
+    try {
+      const local = f.store.all('models')[0],
+        provider = f.store.all('providers')[0];
+      f.store.put('models', { ...local, status: 'online', loadState: 'loaded' });
+      f.store.put('providers', { ...provider, id: 'frontier-test', local: false, enabled: true });
+      f.store.put('models', {
+        ...local,
+        id: 'frontier-model',
+        providerId: 'frontier-test',
+        name: 'gpt-5.1',
+        status: 'online',
+        enabled: true,
+      });
+      f.store.put('bots', {
+        ...f.store.get('bots', 'worker3')!,
+        isPrototype: true,
+        modelId: local.id,
+      });
+      const spaces = new TeamConversations(f.store),
+        space = spaces.create('Active model switch');
+      const root = spaces.channel(space.id, 'boss-man'),
+        template = spaces.channel(space.id, 'worker3');
+      if (change === 'reset')
+        selectTeamModel(f.store, {
+          action: 'apply',
+          modelId: 'frontier-model',
+          reasoningEffort: 'low',
+        });
+      else
+        selectConversationModel(
+          f.store,
+          template.id,
+          { modelId: 'frontier-model', reasoningEffort: 'low' },
+          true,
+        );
+      const run = f.host.runtime.create('boss-man', 'Use one worker clone', root.id),
+        finished = done(f.host, run);
+      await until(() => !!held);
+      if (change === 'prototype') {
+        selectConversationModel(f.store, template.id, { modelId: local.id }, true);
+        f.host.runtime.modelSelectionChanged(template.id);
+      } else {
+        const changed = selectTeamModel(f.store, {
+          action: change === 'team' ? 'apply' : 'reset',
+          ...(change === 'team' ? { modelId: local.id } : {}),
+        });
+        for (const id of changed.conversationIds) f.host.runtime.modelSelectionChanged(id);
+      }
+      const result = await finished;
+      assert.equal(result.status, 'completed', result.error);
+      assert.equal(writes, 1);
+      assert.equal(readFileSync(join(f.dir, 'workspace/worker-receipt.txt'), 'utf8'), 'ONLY_ONCE');
+      const family = result.work!.filter(
+        (work) => work.botId === 'worker3' || work.prototypeId === 'worker3',
+      );
+      assert.ok(family.every((work) => work.modelId === local.id));
+      assert.ok(
+        f.store
+          .all('bots')
+          .filter((bot) => bot.prototypeId === 'worker3')
+          .every((bot) => bot.chatModelId === local.id),
+      );
+      assert.ok(
+        requests.some(
+          (body) =>
+            body.model === local.name &&
+            body.messages[0].content.includes('TEMPORARY CLONE:') &&
+            body.messages.some(
+              (m: any) => m.role === 'tool' && m.content?.includes('worker-receipt.txt'),
+            ),
+        ),
+      );
+    } finally {
+      held?.end();
+      await f.cleanup();
+    }
+  });
 
 test('cancelling a team retires running and queued clones and keeps their task results', async () => {
   const f = await fixture((body) =>

@@ -42,6 +42,8 @@ Online providers manage their context capacity by default, with an optional manu
 
 Click the model indicator in the top bar to apply a model and effort to the whole team once, or return all bots to their saved profile defaults. Individual chats can change afterward. Token counters beside messages show live estimates while responding and provider-reported usage when available, including model calls for tools and context compaction.
 
+Bot settings, chat and team controls share one dropdown of connected online models and loaded local models. Worker clones follow their prototype's effective conversation model and effort; Auto is resolved once for the batch. Changes reach active inherited workers while preserving completed tool work, and live counters name the model actually running.
+
 ## Team spaces and collaboration
 
 One conversation list serves the whole team. Each conversation contains one chat per bot. Switching conversations changes every bot's history together. Handoffs reuse the recipient's chat in that space, with recorded task receipts and results. Recent team context stays within the selected space.

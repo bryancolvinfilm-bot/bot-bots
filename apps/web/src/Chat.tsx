@@ -448,7 +448,7 @@ export function Chat({
     data.assessments,
     jobOptions.task ?? classifyTask(previewPrompt),
     channel?.modelId !== undefined ? channel.modelId : (bot.chatModelId ?? bot.modelId),
-    { botId: bot.prototypeId ?? bot.id, urgency: jobOptions.urgency },
+    { botId: bot.prototypeId ?? bot.id, providerId: bot.providerId, urgency: jobOptions.urgency },
   ).find((m) => m.status !== 'offline');
   const usedModel =
     run?.status === 'running' ? data.models.find((m) => m.id === run.modelId) : undefined;
@@ -805,7 +805,14 @@ export function Chat({
                                 e.handoff?.conversationId === conversationId,
                             )),
                     )
-                    .map((w) => <WorkingTokens key={w.id} work={w} name={bot.name} />) ?? [],
+                    .map((w) => (
+                      <WorkingTokens
+                        key={w.id}
+                        work={w}
+                        name={bot.name}
+                        model={data.models.find((model) => model.id === w.modelId)?.name}
+                      />
+                    )) ?? [],
               )}
             <LiveBuilds runId={run?.id ?? historyRuns.at(-1)?.id} />
             {events.length > 0 && (
@@ -888,6 +895,20 @@ export function Chat({
         )}
         {bot.isPrototype ? (
           <div className="composer-wrap prototype-notice" role="note">
+            <ChatModelControls
+              key={conversationId ?? bot.id}
+              bot={bot}
+              data={data}
+              model={nextModel}
+              conversation={channel}
+              changed={(value) => {
+                if (currentContext.current === `${value.botId}:${value.id}`) {
+                  loadSequence.current++;
+                  setChannel(value);
+                }
+              }}
+              refresh={refresh}
+            />
             <strong>This is a worker prototype</strong>
             <p>
               Ask another bot to delegate to this prototype bot so it can hand back the clones’

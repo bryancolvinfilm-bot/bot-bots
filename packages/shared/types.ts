@@ -152,6 +152,7 @@ export interface Message {
   steeringId?: string;
 }
 export interface Conversation {
+  modelSelectionSource?: 'human' | 'team';
   modelId?: string | null;
   reasoningEffort?: import('./model-effort').ReasoningEffort | null;
   contextCheckpointId?: string;

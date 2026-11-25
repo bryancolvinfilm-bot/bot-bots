@@ -1882,6 +1882,7 @@ export function createApp(
             updated,
           ),
         );
+        runtime.modelDefaultsChanged(updated.id);
         return;
       }
       store.db.exec('BEGIN IMMEDIATE');
@@ -1901,6 +1902,7 @@ export function createApp(
     '/api/bots/:id/model',
     wrap((req, res) => {
       res.json(selectBotModel(store, String(req.params.id), req.body));
+      runtime.modelDefaultsChanged(String(req.params.id));
     }),
   );
   app.patch(
@@ -2353,6 +2355,7 @@ export function createApp(
           ),
           conversations: z.array(
             z.object({
+              modelSelectionSource: z.enum(['human', 'team']).optional(),
               modelId: z.string().nullable().optional(),
               reasoningEffort: z.enum(EFFORTS).nullable().optional(),
               contextCheckpointId: id.optional(),

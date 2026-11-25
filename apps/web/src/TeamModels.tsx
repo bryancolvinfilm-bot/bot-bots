@@ -1,9 +1,10 @@
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import type { Bootstrap } from '../../../packages/shared/types';
 import { runningChatModels } from '../../../packages/shared/chat-models';
 import { effortOptions } from '../../../packages/shared/model-effort';
 import { Field, Modal } from './ui';
 import { api } from './api';
+import { RunningModelOptions } from './RunningModelOptions';
 
 export function TeamModels({
   data,
@@ -64,30 +65,7 @@ export function TeamModels({
           }}
         >
           {!choices.length && <option value="">No running models</option>}
-          {[false, true].map((local) => {
-            const group = choices.filter(
-              (m) => !!data.providers.find((p) => p.id === m.providerId)?.local === local,
-            );
-            return group.length ? (
-              <Fragment key={String(local)}>
-                {local &&
-                  choices.some(
-                    (m) => !data.providers.find((p) => p.id === m.providerId)?.local,
-                  ) && (
-                    <option disabled value="__separator__">
-                      ────────────────
-                    </option>
-                  )}
-                <optgroup label={local ? 'Local · running models' : 'Online · frontier models'}>
-                  {group.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {data.providers.find((p) => p.id === m.providerId)?.name} · {m.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </Fragment>
-            ) : null;
-          })}
+          <RunningModelOptions models={choices} providers={data.providers} />
         </select>
       </Field>
       <Field label="Effort">

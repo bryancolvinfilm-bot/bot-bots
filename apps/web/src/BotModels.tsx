@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   Bootstrap,
@@ -12,6 +12,7 @@ import { effortOptions } from '../../../packages/shared/model-effort';
 import { api } from './api';
 import { Field, Modal } from './ui';
 import { FrontierConnections } from './FrontierConnections';
+import { RunningModelOptions } from './RunningModelOptions';
 
 export function ChatModelControls({
   bot,
@@ -39,8 +40,6 @@ export function ChatModelControls({
       (m.enabled &&
         (!data.settings.localOnly || data.providers.find((p) => p.id === m.providerId)?.local)),
   );
-  const online = choices.filter((m) => !data.providers.find((p) => p.id === m.providerId)?.local);
-  const local = choices.filter((m) => data.providers.find((p) => p.id === m.providerId)?.local);
   const preference =
     conversation?.modelId !== undefined ? conversation.modelId : (bot.chatModelId ?? bot.modelId);
   const selected = choices.find((m) => m.id === preference) ?? model ?? choices[0];
@@ -68,14 +67,6 @@ export function ChatModelControls({
       setBusy(false);
     }
   }
-  const option = (m: Model) => {
-    const p = data.providers.find((p) => p.id === m.providerId)!;
-    return (
-      <option key={m.id} value={m.id}>
-        {p.kind === 'claude-code' ? 'Claude' : p.kind === 'chatgpt' ? 'ChatGPT' : p.name} · {m.name}
-      </option>
-    );
-  };
   return (
     <div className="chat-model-controls">
       <label>
@@ -89,17 +80,7 @@ export function ChatModelControls({
           <option value="">
             {choices.length ? `Suggested · ${model?.name ?? choices[0].name}` : 'No running models'}
           </option>
-          {!!online.length && (
-            <optgroup label="Online · frontier models">{online.map(option)}</optgroup>
-          )}
-          {!!online.length && !!local.length && (
-            <option disabled value="__separator__">
-              ────────────────
-            </option>
-          )}
-          {!!local.length && (
-            <optgroup label="Local · running models">{local.map(option)}</optgroup>
-          )}
+          <RunningModelOptions models={choices} providers={data.providers} />
         </select>
       </label>
       <label>
@@ -173,14 +154,17 @@ export function BotModelPicker({
   change: (bot: Bot) => void;
 }) {
   const [catalog, setCatalog] = useState(data);
+  const [refreshing, setRefreshing] = useState(false),
+    [error, setError] = useState('');
+  useEffect(() => setCatalog(data), [data.models, data.providers]);
   const providers = [
     ...new Map([...data.providers, ...catalog.providers].map((p) => [p.id, p])).values(),
   ];
   const models = [...new Map([...data.models, ...catalog.models].map((m) => [m.id, m])).values()];
-  const selected = providers.find(
-    (p) => p.id === (bot.providerId ?? models.find((m) => m.id === bot.modelId)?.providerId),
-  );
-  const [tab, setTab] = useState(selected && !selected.local ? 'online' : 'local');
+  const choices = runningChatModels(models, providers);
+  const selected = choices.find((model) => model.id === bot.modelId);
+  const provider = providers.find((p) => p.id === selected?.providerId);
+  const efforts = effortOptions(selected, provider);
   const [connect, setConnect] = useState(false);
   const act = useCallback(async (fn: () => Promise<unknown>) => {
     await fn();
@@ -188,94 +172,90 @@ export function BotModelPicker({
   }, []);
   return (
     <div className="bot-model-picker">
-      <div className="tabs" role="tablist" aria-label="Model location">
-        {['local', 'online'].map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            className={tab === t ? 'active' : ''}
-            onClick={() => setTab(t)}
-          >
-            {t === 'local' ? 'Local' : 'Online'}
-          </button>
-        ))}
+      <Field label="Default model suggestion">
+        <select
+          aria-label="Bot model"
+          disabled={refreshing}
+          value={bot.modelId && !selected ? '__unavailable__' : (bot.modelId ?? '')}
+          onChange={(e) => {
+            const model = choices.find((m) => m.id === e.target.value);
+            change({
+              ...bot,
+              providerId: model?.providerId ?? null,
+              modelId: model?.id ?? null,
+              reasoningEffort: null,
+            });
+          }}
+        >
+          <option value="">
+            {bot.providerId
+              ? `Auto · prefer ${providers.find((provider) => provider.id === bot.providerId)?.name ?? 'saved service'}`
+              : 'Auto · team router'}
+          </option>
+          {bot.modelId && !selected && (
+            <option disabled value="__unavailable__">
+              Saved suggestion is unavailable
+            </option>
+          )}
+          <RunningModelOptions models={choices} providers={providers} />
+        </select>
+      </Field>
+      <Field label="Effort">
+        <select
+          aria-label="Bot effort"
+          disabled={!efforts.length || refreshing}
+          value={
+            bot.reasoningEffort && efforts.includes(bot.reasoningEffort) ? bot.reasoningEffort : ''
+          }
+          onChange={(e) =>
+            change({ ...bot, reasoningEffort: (e.target.value as Bot['reasoningEffort']) || null })
+          }
+        >
+          <option value="">{efforts.length ? 'Default' : 'Model managed'}</option>
+          {efforts.map((e) => (
+            <option key={e} value={e}>
+              {e[0].toUpperCase() + e.slice(1)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="button-row">
+        <button
+          type="button"
+          className="secondary small"
+          disabled={refreshing}
+          onClick={() => {
+            setRefreshing(true);
+            setError('');
+            void act(() => api('/models/refresh', 'POST', {}))
+              .catch((e) => setError(e.message))
+              .finally(() => setRefreshing(false));
+          }}
+        >
+          Refresh running models
+        </button>
+        <button type="button" className="secondary small" onClick={() => setConnect(true)}>
+          Connect ChatGPT or Claude
+        </button>
       </div>
-      <div role="tabpanel" aria-label={tab === 'local' ? 'Local models' : 'Online services'}>
-        {tab === 'local' ? (
-          <Field label="Local model">
-            <select
-              aria-label="Local model"
-              value={selected?.local ? (bot.modelId ?? `provider:${selected.id}`) : ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                const model = models.find((m) => m.id === value);
-                change({
-                  ...bot,
-                  providerId:
-                    model?.providerId ?? (value.startsWith('provider:') ? value.slice(9) : null),
-                  modelId: model?.id ?? null,
-                  reasoningEffort: null,
-                });
-              }}
-            >
-              <option value="">Auto · team router</option>
-              {providers
-                .filter((p) => p.local)
-                .map((p) => (
-                  <optgroup key={p.id} label={p.name}>
-                    <option value={`provider:${p.id}`}>Auto · {p.name}</option>
-                    {models
-                      .filter(
-                        (m) => m.providerId === p.id && (!m.modelType || m.modelType === 'llm'),
-                      )
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-            </select>
-          </Field>
-        ) : (
-          <>
-            <Field label="Online service">
-              <select
-                aria-label="Online service"
-                value={selected && !selected.local ? selected.id : ''}
-                onChange={(e) =>
-                  change({
-                    ...bot,
-                    providerId: e.target.value || null,
-                    modelId: null,
-                    reasoningEffort: null,
-                  })
-                }
-              >
-                <option value="">Choose a connected service…</option>
-                {providers
-                  .filter((p) => !p.local)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-            <div className="button-row">
-              <button type="button" className="secondary small" onClick={() => setConnect(true)}>
-                Connect ChatGPT or Claude
-              </button>
-            </div>
-            <small>
-              Connect once for the team. Choose the model and effort in chat. Selecting an online
-              service allows it to receive this bot’s conversation context.
-            </small>
-          </>
-        )}
-      </div>
+      <small>
+        Saved suggestions are defaults. Each conversation can choose another model in chat.
+        {bot.isPrototype
+          ? ' Worker clones follow this prototype’s conversation selection and effort.'
+          : ''}
+      </small>
+      {bot.chatModelId && (
+        <small>
+          Team selection:{' '}
+          {models.find((model) => model.id === bot.chatModelId)?.name ?? 'unavailable'}. Change this
+          bot’s current conversation in chat, or return the team to defaults.
+        </small>
+      )}
+      {error && (
+        <small className="error-text" role="alert">
+          {error}
+        </small>
+      )}
       {connect &&
         createPortal(
           <Modal title="Connect an online service" close={() => setConnect(false)} wide>

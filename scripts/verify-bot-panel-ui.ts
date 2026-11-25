@@ -13,6 +13,7 @@ const dir = resolve(`test-results/bot-panel/ui-${Date.now()}`);
 mkdirSync(dir, { recursive: true });
 const store = new Store(join(dir, 'host/team.sqlite'));
 seedTestTeam(store);
+store.put('bots', { ...store.get('bots', 'worker3')!, isPrototype: true });
 const calls: any[] = [];
 const model = createServer(async (req, res) => {
   let raw = '';
@@ -192,23 +193,35 @@ try {
   await until(async () => (await panel.getByText('Morning check', { exact: true }).count()) === 0);
   await page.getByRole('button', { name: 'Customize', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'A little more Calendar', exact: true });
-  await editor.getByRole('tab', { name: 'Local', exact: true }).click();
+  assert.equal(await editor.getByRole('tab', { name: 'Local', exact: true }).count(), 0);
+  assert.equal(await editor.getByRole('tab', { name: 'Online', exact: true }).count(), 0);
+  assert.deepEqual(
+    await editor
+      .getByLabel('Bot model', { exact: true })
+      .locator('optgroup')
+      .evaluateAll((elements) => elements.map((e) => e.getAttribute('label'))),
+    ['Online · frontier models', 'Local · running models'],
+  );
   assert.equal(
     await editor
-      .getByLabel('Local model', { exact: true })
-      .locator('option')
-      .filter({ hasText: 'gpt-5.1' })
+      .getByLabel('Bot model', { exact: true })
+      .locator('option[value="unloaded-test"]')
       .count(),
     0,
   );
-  await editor.getByRole('tab', { name: 'Online', exact: true }).click();
+  await editor.getByLabel('Bot model', { exact: true }).selectOption('test-chatgpt-b');
+  await editor.getByLabel('Bot effort', { exact: true }).selectOption('high');
   await editor.getByRole('button', { name: 'Connect ChatGPT or Claude', exact: true }).click();
   const connection = page.getByRole('dialog', { name: 'Connect an online service', exact: true });
   await connection.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).waitFor();
   await connection.getByRole('button', { name: 'Done', exact: true }).click();
   assert.equal(await editor.isVisible(), true);
-  await editor.getByLabel('Online service', { exact: true }).selectOption('test-chatgpt');
-  await page.screenshot({ path: join(dir, 'local-online-service-picker.png') });
+  assert.equal(
+    await editor.getByLabel('Bot model', { exact: true }).inputValue(),
+    'test-chatgpt-b',
+  );
+  assert.equal(await editor.getByLabel('Bot effort', { exact: true }).inputValue(), 'high');
+  await page.screenshot({ path: join(dir, 'unified-bot-model-picker.png') });
   await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
   await editor.waitFor({ state: 'hidden' });
   const originalBot = store.get('bots', 'calendar')!;
@@ -307,6 +320,13 @@ try {
   );
   assert.equal(await page.getByLabel('Reasoning effort', { exact: true }).isVisible(), true);
   await page.screenshot({ path: join(dir, 'single-running-model-dropdown.png') });
+  await page.getByRole('button', { name: 'Open Worker3', exact: true }).click();
+  await page.getByLabel('Chat model', { exact: true }).waitFor();
+  await page.getByLabel('Chat model', { exact: true }).selectOption(chosen.id);
+  await until(() =>
+    store.all('conversations').some((c) => c.botId === 'worker3' && c.modelId === chosen.id),
+  );
+  await page.screenshot({ path: join(dir, 'prototype-chat-model-controls.png') });
   assert.deepEqual(errors, []);
   writeFileSync(
     join(dir, 'verified.json'),
@@ -316,7 +336,7 @@ try {
         pausedInChat: true,
         deletedInChat: true,
         panelUpdated: true,
-        localOnlineSeparated: true,
+        unifiedBotModelPicker: true,
         connectionModalPreservedEditor: true,
         selectedServiceEnablesModel: true,
         chatModelAndEffortPersist: true,
@@ -329,6 +349,7 @@ try {
         providerTotalsPersist: true,
         teamSwitchAndReset: true,
         individualOverrideAfterTeamSwitch: true,
+        prototypeChatModelControls: true,
         errors,
       },
       null,

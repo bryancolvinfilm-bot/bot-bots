@@ -49,6 +49,7 @@ export function selectTeamModel(store: Store, input: unknown) {
     for (const channel of channels)
       store.put('conversations', {
         ...channel,
+        modelSelectionSource: value.action === 'apply' ? 'team' : undefined,
         modelId: value.action === 'apply' ? model!.id : undefined,
         reasoningEffort: value.action === 'apply' ? (value.reasoningEffort ?? null) : undefined,
       });
@@ -96,7 +97,12 @@ export function selectConversationModel(
       store.put('models', { ...model, enabled: true, enablement: 'manual' });
       if (!provider.local) store.setConfig('settings', { ...store.settings(), localOnly: false });
     }
-    const saved = store.put('conversations', { ...conversation, modelId, reasoningEffort: effort });
+    const saved = store.put('conversations', {
+      ...conversation,
+      modelId,
+      reasoningEffort: effort,
+      modelSelectionSource: 'human',
+    });
     store.db.exec('COMMIT');
     return saved;
   } catch (error) {

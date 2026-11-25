@@ -53,7 +53,15 @@ export function MessageTokens({ message, run }: { message: Message; run?: Run })
     />
   );
 }
-export function WorkingTokens({ work, name }: { work: WorkRecord; name: string }) {
+export function WorkingTokens({
+  work,
+  name,
+  model,
+}: {
+  work: WorkRecord;
+  name: string;
+  model?: string;
+}) {
   return (
     <div className="working-token-message" data-work-id={work.id}>
       <strong>
@@ -65,6 +73,7 @@ export function WorkingTokens({ work, name }: { work: WorkRecord; name: string }
             : work.queued
               ? 'Waiting for model'
               : 'Processing'}
+          {model ? ` · ${model}` : ''}
         </span>
       </strong>
       <TokenCounter

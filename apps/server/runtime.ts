@@ -362,6 +362,10 @@ export class Runtime {
   private controls: BotControls;
   private contexts: ContextManager;
   private modelChanges = new Set<string>();
+  private workerBatches = new Map<
+    string,
+    { signature: string; modelId?: string | null; reasoningEffort?: Bot['reasoningEffort'] }
+  >();
   private inference = new Semaphore(() => this.store.settings().maxParallelModels ?? 2);
   constructor(
     public store: Store,
@@ -614,7 +618,8 @@ export class Runtime {
       });
     }
   }
-  private modelPreference(run: Run, bot: Bot, handoffId?: string) {
+  private baseModelPreference(run: Run, bot: Bot, handoffId?: string) {
+    bot = this.store.get('bots', bot.id) ?? bot;
     const id = handoffId ? this.mailbox.get(handoffId)?.conversationId : run.conversationId;
     let channel = id ? this.store.get('conversations', id) : undefined;
     if (bot.prototypeId && channel?.botId !== bot.id && channel?.spaceId)
@@ -629,6 +634,75 @@ export class Runtime {
           reasoningEffort: bot.chatModelId ? bot.chatReasoningEffort : bot.reasoningEffort,
           explicit: false,
         };
+  }
+
+  private workerPreference(run: Run, prototype: Bot, handoffId?: string) {
+    const preference = this.baseModelPreference(run, prototype, handoffId);
+    const record = run.work?.findLast(
+      (work) =>
+        work.botId === prototype.id && work.handoffId === handoffId && work.status === 'running',
+    );
+    if (!record || !this.workerBatches.has(record.id)) return preference;
+    const signature = JSON.stringify([
+      preference,
+      this.store.get('bots', prototype.id)?.providerId,
+      this.store.settings().localOnly,
+    ]);
+    let batch = this.workerBatches.get(record.id)!;
+    if (
+      batch.signature !== signature ||
+      (batch.modelId && this.store.get('models', batch.modelId)?.status === 'offline')
+    ) {
+      const available = candidates(this.store, record.task, preference.modelId, {
+        botId: prototype.id,
+        urgency: record.urgency,
+      });
+      const chosen = available.find((model) => model.status === 'online') ?? available[0];
+      batch = {
+        signature,
+        modelId: chosen?.id ?? preference.modelId,
+        reasoningEffort:
+          !preference.modelId || preference.modelId === chosen?.id
+            ? preference.reasoningEffort
+            : null,
+      };
+      this.workerBatches.set(record.id, batch);
+      for (const child of run.work ?? []) {
+        const receipt = child.handoffId ? this.mailbox.get(child.handoffId) : undefined;
+        if (
+          child.prototypeId !== prototype.id ||
+          child.status !== 'running' ||
+          receipt?.parentId !== handoffId
+        )
+          continue;
+        if (
+          receipt &&
+          this.store.get('conversations', receipt.conversationId)?.modelSelectionSource === 'human'
+        )
+          continue;
+        const clone = this.store.get('bots', child.botId);
+        if (clone)
+          this.store.put('bots', {
+            ...clone,
+            chatModelId: batch.modelId ?? undefined,
+            chatReasoningEffort: batch.reasoningEffort,
+          });
+      }
+    }
+    return { modelId: batch.modelId, reasoningEffort: batch.reasoningEffort, explicit: true };
+  }
+
+  private modelPreference(run: Run, bot: Bot, handoffId?: string) {
+    if (bot.isPrototype) return this.workerPreference(run, bot, handoffId);
+    if (bot.prototypeId) {
+      const receipt = handoffId ? this.mailbox.get(handoffId) : undefined;
+      const ownChannel = receipt && this.store.get('conversations', receipt.conversationId);
+      if (ownChannel?.modelSelectionSource === 'human')
+        return this.baseModelPreference(run, bot, handoffId);
+      const prototype = this.store.get('bots', bot.prototypeId);
+      if (prototype) return this.workerPreference(run, prototype, receipt?.parentId);
+    }
+    return this.baseModelPreference(run, bot, handoffId);
   }
 
   private usageChanged(run: Run, work: WorkRecord) {
@@ -654,9 +728,14 @@ export class Runtime {
         const channelId = work.handoffId
           ? this.mailbox.get(work.handoffId)?.conversationId
           : run.conversationId;
+        const worker = this.store.get('bots', work.botId);
+        const ownChannel = this.store.get('conversations', channelId ?? '');
+        const inheritsPrototype =
+          worker?.prototypeId === conversation.botId &&
+          ownChannel?.modelSelectionSource !== 'human';
         if (
           work.status === 'running' &&
-          work.botId === conversation.botId &&
+          (work.botId === conversation.botId || inheritsPrototype) &&
           (channelId === conversationId ||
             (!!conversation.spaceId &&
               this.store.get('conversations', channelId ?? '')?.spaceId === conversation.spaceId))
@@ -666,6 +745,13 @@ export class Runtime {
         }
       }
     }
+  }
+
+  modelDefaultsChanged(botId: string) {
+    for (const channel of this.store
+      .all('conversations')
+      .filter((channel) => channel.botId === botId))
+      this.modelSelectionChanged(channel.id);
   }
 
   private panelRequest(run: Run, request: string) {
@@ -1299,6 +1385,7 @@ SHARED SKILLS (use skill_read to load): ${this.help
       if (record.context) record.context.status = 'ready';
       this.contexts.end(record.id);
       this.modelChanges.delete(record.id);
+      this.workerBatches.delete(record.id);
       this.computer.releaseWork(bot.id, run.id, handoffId);
       this.builds.finish(record.id);
       this.store.put('tasks', {
@@ -1691,7 +1778,10 @@ SHARED SKILLS (use skill_read to load): ${this.help
     record: WorkRecord,
   ): Promise<string> {
     const request = { tasks };
+    prototype = this.store.get('bots', prototype.id) ?? prototype;
     const bot = prototype;
+    this.workerBatches.set(record.id, { signature: '' });
+    const selection = this.workerPreference(run, prototype, parentHandoffId);
     const deliveryKey = undefined;
     const limit = this.store.settings().maxWorkerClones ?? 30;
     const activeClones = this.store.all('bots').filter((b) => b.cloneStatus === 'active').length;
@@ -1704,6 +1794,8 @@ SHARED SKILLS (use skill_read to load): ${this.help
       this.store.setConfig(`clone-count-${prototype.id}`, ordinal);
       const clone = {
         ...prototype,
+        chatModelId: selection.modelId ?? undefined,
+        chatReasoningEffort: selection.reasoningEffort,
         id: randomUUID(),
         name: `${prototype.name} ${ordinal}`,
         isPrototype: false,
@@ -1759,7 +1851,7 @@ SHARED SKILLS (use skill_read to load): ${this.help
               milestones: [],
             });
           this.store.put('bots', {
-            ...clone,
+            ...(this.store.get('bots', clone.id) ?? clone),
             instructions: '',
             description: '',
             cloneStatus: 'retired',
@@ -1987,6 +2079,7 @@ SHARED SKILLS (use skill_read to load): ${this.help
     let switches = 0;
     for (let modelIndex = 0; modelIndex < available.length; modelIndex++) {
       const model = available[modelIndex];
+      record.modelId = model.id;
       if (signal.aborted) throw signal.reason;
       const provider = this.store.get('providers', model.providerId)!;
       this.event(run, 'route', bot.id, `Using ${model.name} · ${provider.name}`, {
