@@ -1,4 +1,13 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  shell,
+  systemPreferences,
+} from 'electron';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,6 +16,7 @@ import { startServer } from '../server/index';
 import { Computer } from '../server/computer';
 import { ChromiumComputer } from './browser';
 import { ChromiumPreview } from './preview';
+import { NativeSpeech, microphoneAllowed } from './speech';
 let chromium: ChromiumComputer | undefined;
 const profileDir = process.env.BOT_BOTS_DATA_DIR
   ? join(process.env.BOT_BOTS_DATA_DIR, 'desktop-profile')
@@ -79,11 +89,50 @@ function window(url: string) {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   chromium?.attach(win);
-  const trusted = (event: Electron.IpcMainInvokeEvent) =>
+  const trusted = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) =>
     event.sender === win.webContents &&
     event.senderFrame === win.webContents.mainFrame &&
     new URL(event.senderFrame.url).origin === new URL(url).origin &&
     new URL(event.senderFrame.url).pathname === new URL(url).pathname;
+  const helperRoot = app.isPackaged
+    ? join(process.resourcesPath, 'speech')
+    : join(app.getAppPath(), 'dist', 'speech');
+  const speech = new NativeSpeech(
+    process.platform === 'win32'
+      ? join(helperRoot, 'BotBotsSpeech.exe')
+      : process.platform === 'darwin'
+        ? join(helperRoot, 'BotBotsSpeech.app', 'Contents', 'MacOS', 'BotBotsSpeech')
+        : undefined,
+    (value) => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed())
+        win.webContents.send('speech:event', value);
+    },
+  );
+  for (const name of ['speech:capabilities', 'speech:start', 'speech:stop'])
+    ipcMain.removeHandler(name);
+  ipcMain.removeAllListeners('speech:audio');
+  let microphoneApproved = false;
+  ipcMain.handle('speech:capabilities', (event, locale) => {
+    if (!trusted(event) || typeof locale !== 'string') throw Error('Untrusted dictation request.');
+    return speech.capabilities(locale);
+  });
+  ipcMain.handle('speech:start', async (event, id, locale) => {
+    if (!trusted(event) || typeof id !== 'string' || typeof locale !== 'string')
+      throw Error('Untrusted dictation request.');
+    await speech.start(id, locale);
+    microphoneApproved = true;
+  });
+  ipcMain.handle('speech:stop', (event, id, cancel) => {
+    if (!trusted(event) || typeof id !== 'string' || typeof cancel !== 'boolean')
+      throw Error('Untrusted dictation request.');
+    return speech.stop(id, cancel);
+  });
+  ipcMain.on('speech:audio', (event, id, pcm) => {
+    if (trusted(event) && typeof id === 'string') speech.audio(id, pcm);
+  });
+  win.on('closed', () => speech.cancel());
+  win.webContents.on('render-process-gone', () => speech.cancel());
+  win.webContents.on('did-start-navigation', () => speech.cancel());
   ipcMain.removeHandler('app:open-external');
   ipcMain.removeHandler('app:set-mode');
   ipcMain.handle('app:open-external', async (event, value) => {
@@ -142,9 +191,36 @@ function window(url: string) {
   win.webContents.on('will-navigate', (event, target) => {
     if (new URL(target).origin !== new URL(url).origin) event.preventDefault();
   });
-  win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) =>
-    callback(false),
+  win.webContents.session.setPermissionCheckHandler(
+    (contents, permission, _origin, details) =>
+      permission === 'media' &&
+      microphoneAllowed(url, {
+        sameContents: contents === win.webContents,
+        isMainFrame: details.isMainFrame,
+        url: details.requestingUrl ?? '',
+        media: details.mediaType ? [details.mediaType] : [],
+        active: speech.active || microphoneApproved,
+      }),
   );
+  win.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const media = details as Electron.MediaAccessPermissionRequest;
+    if (
+      permission !== 'media' ||
+      !microphoneAllowed(url, {
+        sameContents: contents === win.webContents,
+        isMainFrame: media.isMainFrame,
+        url: media.requestingUrl,
+        media: media.mediaTypes ?? [],
+        active: speech.active,
+      })
+    ) {
+      callback(false);
+      return;
+    }
+    if (process.platform === 'darwin')
+      void systemPreferences.askForMediaAccess('microphone').then(callback, () => callback(false));
+    else callback(true);
+  });
   void win.loadURL(url).catch(async () => {
     if (win.isDestroyed() || closing) return;
     if (role.mode !== 'client') {

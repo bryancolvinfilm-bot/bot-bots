@@ -25,6 +25,7 @@ import { Avatar } from './Avatar';
 import { CodeBlock, downloadCode } from './CodeBlock';
 import { filenameFor, showPreview } from '../../../packages/shared/artifacts';
 import { api } from './api';
+import type { DictationTarget } from '../../../packages/shared/speech';
 
 function mentionStyle(bot: Bot): CSSProperties {
   return {
@@ -236,6 +237,7 @@ function placeCaret(editor: HTMLElement, offset: number) {
 
 export interface MentionComposerHandle {
   getMarkdown: () => string;
+  dictation: () => DictationTarget | undefined;
 }
 export const MentionComposer = forwardRef<
   MentionComposerHandle,
@@ -260,7 +262,10 @@ export const MentionComposer = forwardRef<
   const listId = useId();
   useImperativeHandle(
     ref,
-    () => ({ getMarkdown: () => (editor.current ? editorText(editor.current, true) : '') }),
+    () => ({
+      getMarkdown: () => (editor.current ? editorText(editor.current, true) : ''),
+      dictation: dictationTarget,
+    }),
     [],
   );
   useEffect(() => {
@@ -280,6 +285,75 @@ export const MentionComposer = forwardRef<
     document.getElementById(`${listId}-${selected}`)?.scrollIntoView({ block: 'nearest' });
   }, [selected, listId]);
 
+  function dictationTarget(): DictationTarget | undefined {
+    const root = editor.current;
+    if (!root) return;
+    const selection = window.getSelection();
+    const range =
+      selection?.rangeCount && root.contains(selection.getRangeAt(0).commonAncestorContainer)
+        ? selection.getRangeAt(0).cloneRange()
+        : document.createRange();
+    if (!root.contains(range.commonAncestorContainer)) {
+      range.selectNodeContents(root);
+      range.collapse(false);
+    }
+    let span: HTMLSpanElement | undefined,
+      prefix = '',
+      suffix = '',
+      previous = '',
+      closed = false;
+    return {
+      update(text) {
+        if (closed || !root.isConnected || (span && !root.contains(span))) return false;
+        if (!text && !span) return true;
+        if (!span) {
+          if (!root.contains(range.commonAncestorContainer)) {
+            range.selectNodeContents(root);
+            range.collapse(false);
+          }
+          const before = range.cloneRange();
+          before.selectNodeContents(root);
+          before.setEnd(range.startContainer, range.startOffset);
+          const after = range.cloneRange();
+          after.selectNodeContents(root);
+          after.setStart(range.endContainer, range.endOffset);
+          const left = editorText(before.cloneContents()),
+            right = editorText(after.cloneContents());
+          prefix = left && !/\s$/.test(left) ? ' ' : '';
+          suffix = right && !/^[\s.,!?;:)]/.test(right) ? ' ' : '';
+          range.deleteContents();
+          span = document.createElement('span');
+          span.className = 'dictated-text';
+          span.contentEditable = 'false';
+          range.insertNode(span);
+          if (document.activeElement === root) {
+            range.setStartAfter(span);
+            range.collapse(true);
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          }
+        }
+        const value = text ? prefix + text + suffix : '';
+        if (value !== previous) {
+          span.textContent = value;
+          previous = value;
+          currentText.current = editorText(root);
+          onChange(currentText.current);
+        }
+        setQuery(undefined);
+        return true;
+      },
+      finish(notify = true) {
+        if (closed) return;
+        closed = true;
+        if (span && root.contains(span)) {
+          span.replaceWith(document.createTextNode(span.textContent ?? ''));
+          currentText.current = editorText(root);
+          if (notify) onChange(currentText.current);
+        }
+      },
+    };
+  }
   function createChip(bot: Bot) {
     const chip = document.createElement('span');
     chip.className = 'bot-mention composer-mention';

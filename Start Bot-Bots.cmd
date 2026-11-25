@@ -3,6 +3,7 @@ setlocal
 cd /d "%~dp0"
 set "BOT_BOTS_DATA_DIR=%CD%\data"
 set "ELECTRON_RUN_AS_NODE="
+if exist "release\0.2.26\win-unpacked\Bot-Bots.exe" goto dictation
 if exist "release\0.2.25\win-unpacked\Bot-Bots.exe" goto workermodels
 if exist "release\0.2.24\win-unpacked\Bot-Bots.exe" goto tokenmodels
 if exist "release\0.2.23\win-unpacked\Bot-Bots.exe" goto chatmodels
@@ -45,6 +46,9 @@ start "Bot-Bots" "node_modules\electron\dist\electron.exe" .
 exit /b 0
 :packaged
 start "Bot-Bots" "release\win-unpacked\Bot-Bots.exe"
+exit /b 0
+:dictation
+start "Bot-Bots" "release\0.2.26\win-unpacked\Bot-Bots.exe"
 exit /b 0
 :workermodels
 start "Bot-Bots" "release\0.2.25\win-unpacked\Bot-Bots.exe"

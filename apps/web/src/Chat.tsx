@@ -48,6 +48,7 @@ import { applyUsageUpdate } from '../../../packages/shared/token-usage';
 import { contextDescription } from '../../../packages/shared/chat-models';
 import { TaskJourney } from './TaskJourney';
 import { LiveBuilds } from './LiveBuilds';
+import { VoiceInput, type VoiceInputHandle } from './VoiceInput';
 import { rankModels, classifyTask, canUseTools } from '../../../packages/shared/model-routing';
 import { humanHandoffs } from '../../../packages/shared/delivery';
 import {
@@ -123,6 +124,7 @@ export function Chat({
     importance: 'normal',
   });
   const composer = useRef<MentionComposerHandle>(null);
+  const voice = useRef<VoiceInputHandle>(null);
   const [run, setRun] = useState<Run>();
   const [events, setEvents] = useState<RunEvent[]>([]);
   const bottom = useRef<HTMLDivElement>(null);
@@ -250,6 +252,7 @@ export function Chat({
       return;
     }
     if (!text.trim() || sending || !conversationId) return;
+    voice.current?.cancel();
     if (
       wantsPrivateEntry(text) ||
       (credentialService(
@@ -971,6 +974,14 @@ export function Chat({
                 onChange={setPrompt}
                 onSend={(text) => void send(text)}
                 busy={sending}
+              />
+              <VoiceInput
+                key={context}
+                ref={voice}
+                disabled={
+                  sending || !conversationId || data.accessRole === 'viewer' || !!bot.prototypeId
+                }
+                target={() => composer.current?.dictation()}
               />
               <div className="composer-bottom">
                 <span

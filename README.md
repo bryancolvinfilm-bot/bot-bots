@@ -50,6 +50,8 @@ One conversation list serves the whole team. Each conversation contains one chat
 
 Bots support customizable SVG avatars, processing animations, role instructions, memory, routines, model preferences, and temporary worker prototypes. Your messages appear on the right and bot replies on the left. Active processing animations stay visible while you scroll.
 
+The Windows and macOS desktop chat composer has **Start dictation** and a **Microphone input** selector. Spoken words appear live in the editable draft; dictation never sends a message automatically. Windows uses its installed speech engine. macOS uses Apple's Speech framework, preferring on-device recognition when supported; its system service may process audio for other languages. Audio is not saved or sent to the Bot-Bots host. Switching chats or sending the prompt stops capture. A microphone choice belongs to the viewing computer, including desktop clients connected to another host. Browser clients show the desktop-app requirement.
+
 See [team conversations](docs/TEAM-CONVERSATIONS.md) and [bot workshop](docs/WORKSHOP.md).
 
 ## Tools and shared skills

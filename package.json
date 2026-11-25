@@ -1,6 +1,6 @@
 {
   "name": "bot-bots",
-  "version": "0.2.25",
+  "version": "0.2.26",
   "private": true,
   "type": "module",
   "description": "Local-first, model-independent bot team and desktop app",
@@ -11,10 +11,11 @@
   "scripts": {
     "dev": "tsx apps/server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build && tsup",
+    "build": "tsc --noEmit && vite build && tsup && node scripts/build-speech.mjs",
+    "build:speech": "node scripts/build-speech.mjs",
     "start": "node dist/server/index.js",
     "desktop": "electron .",
-    "package:desktop": "electron-builder --dir",
+    "package:desktop": "node scripts/build-speech.mjs && electron-builder --dir",
     "build:launcher": "node scripts/build-launcher.mjs",
     "test": "tsx --test tests/*.test.ts",
     "check": "tsc --noEmit",
@@ -54,13 +55,22 @@
     "appId": "com.botbots.desktop",
     "productName": "Bot-Bots",
     "directories": {
-      "output": "release/0.2.25"
+      "output": "release/0.2.26"
     },
     "files": [
       "dist/**/*",
       "resources/google-oauth.json",
       "resources/app-help/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/speech",
+        "to": "speech",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "asarUnpack": [
       "dist/server/**/*",
@@ -74,6 +84,12 @@
       ]
     },
     "mac": {
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Use the microphone you choose to turn spoken prompts into editable chat text.",
+        "NSSpeechRecognitionUsageDescription": "Turn spoken prompts into editable text using macOS speech recognition."
+      },
       "target": [
         "dmg"
       ],

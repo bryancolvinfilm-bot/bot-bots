@@ -1,0 +1,30 @@
+.voice-input {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 7px 0;
+}
+.voice-input select {
+  max-width: min(260px, 60vw);
+  min-width: 140px;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.voice-input .voice-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.voice-mic.listening {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+}
+.voice-input .error-text {
+  flex-basis: 100%;
+}
+.dictated-text {
+  background: var(--accent-soft);
+  border-bottom: 1px dotted var(--accent);
+  white-space: pre-wrap;
+}
